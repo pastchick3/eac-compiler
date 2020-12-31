@@ -3,3 +3,4 @@ A simple C compiler for learning, based on "Engineering a Compiler (the 2nd Edit
 
 https://github.com/antlr/grammars-v4
 remember `antlr4-runtime.lib` is ignored!
+https://doc.rust-lang.org/nomicon/ffi.html

@@ -8,6 +8,8 @@ edition = "2018"
 
 [dependencies]
 libc = "0.2"
+structopt = "0.3"
+indexmap = "1.6"
 
 [build-dependencies]
 cmake = "0.1"

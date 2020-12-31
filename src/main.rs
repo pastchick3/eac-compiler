@@ -1,10 +1,20 @@
-use libc::c_int;
+use std::path::PathBuf;
+use structopt::StructOpt;
+use eac_compiler::Compiler;
 
-#[link(name = "parser")]
-extern "C" {
-    fn parse() -> c_int;
+
+#[derive(StructOpt)]
+#[structopt(name = "parser")]
+struct Opt {
+    #[structopt(parse(from_os_str))]
+    input: PathBuf,
+
+    #[structopt(short, long, parse(from_os_str), default_value = "./program.exe")]
+    output: PathBuf,
 }
 
 fn main() {
-    println!("{}", unsafe { parse() });
+    let opt = Opt::from_args();
+    let compiler = Compiler::new();
+    compiler.run(&opt.input, &opt.output);
 }

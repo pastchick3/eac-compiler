@@ -25,5 +25,5 @@ extern "C" int parse() {
     // // antlr4::tree::ParseTreeWalker::DEFAULT.walk(&listener, tree);
     // std::cout << tree->toStringTree(&parser) << std::endl;
 
-    return 1;
+    return 2;
 }
