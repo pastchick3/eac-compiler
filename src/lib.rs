@@ -1,7 +1,8 @@
 mod parser;
+mod ast;
 
 use std::path::Path;
-use parser::parse;
+use crate::parser::parse;
 
 pub struct Compiler {
     

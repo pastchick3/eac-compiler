@@ -1,9 +1,32 @@
-use libc::c_int;
+use libc::{c_char, size_t};
+use std::ffi::CString;
+use std::path::Path;
+use crate::ast::AST;
+
+pub fn parse(path: &Path) -> AST {
+    let path = path.to_str().expect("Invalid input file path.");
+    let path = CString::new(path).expect("Invalid input file path.");
+    let events = unsafe { _parse(path.as_ptr()) };
+    AST {}
+}
+
+#[repr(C)]
+struct Event {
+    tag: *mut c_char,
+    text: *const c_char,
+}
+
+#[repr(C)]
+struct Events {
+    data: *mut Event,
+    len: size_t,
+}
 
 #[link(name = "parser")]
 extern "C" {
-    pub fn parse() -> c_int;
+    pub fn _parse(path: *const c_char) -> Events;
 }
+
 
 
 

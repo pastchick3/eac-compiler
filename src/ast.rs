@@ -1,11 +1,17 @@
+#![allow(dead_code)]
+
 use std::cell::RefCell;
 use std::cmp::PartialEq;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
-use colored::*;
-use indexmap::IndexMap;
+// use colored::*;
+// use indexmap::IndexMap;
+
+#[derive(Debug)]
+pub struct AST {}
+
 
 /// Represent all errors that may occur during the transpilation.
 #[derive(Debug, PartialEq)]
@@ -23,17 +29,17 @@ impl fmt::Display for Error {
                 f,
                 "{} {}: {}",
                 location,
-                "Preprocessing Error".red(),
+                "Preprocessing Error",
                 message
             ),
             Error::Lexing { message, location } => {
-                write!(f, "{} {}: {}", location, "Lexing Error".red(), message)
+                write!(f, "{} {}: {}", location, "Lexing Error", message)
             }
             Error::Parsing { message, location } => {
-                write!(f, "{} {}: {}", location, "Parsing Error".red(), message)
+                write!(f, "{} {}: {}", location, "Parsing Error", message)
             }
             Error::Resolving { message, location } => {
-                write!(f, "{} {}: {}", location, "Resolving Error".red(), message)
+                write!(f, "{} {}: {}", location, "Resolving Error", message)
             }
         }
     }
@@ -211,7 +217,7 @@ pub enum Type {
     Char(Option<Location>),
     Struct {
         name: String,
-        members: IndexMap<String, Type>,
+        members: Vec<(String, Type)>,
         location: Option<Location>,
     },
     Nothing,
@@ -770,7 +776,7 @@ pub struct Function {
     pub is_proto: bool, // whether it is a prototype for internal usages only
     pub return_type: Rc<RefCell<Type>>,
     pub name: String,
-    pub parameters: IndexMap<String, Rc<RefCell<Type>>>,
+    pub parameters: Vec<(String, Rc<RefCell<Type>>)>,
     pub ellipsis: bool, // whether the parameter list contains an ellipsis
     pub body: Statement,
     pub location: Location,
