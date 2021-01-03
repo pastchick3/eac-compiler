@@ -41,7 +41,7 @@ A simple C compiler for learning, based on "Engineering a Compiler (the 2nd Edit
                             | <logical-AND-expression> "&&" <equality-expression>;
 <logical-OR-expression> ::= <logical-AND-expression>
                             | <logical-OR-expression> "||" <logical-AND-expression>;
-<expression> = <logical-OR-expression>;
+<expression> ::= <logical-OR-expression>;
 
 
 <statement> ::= <declaration-statement>

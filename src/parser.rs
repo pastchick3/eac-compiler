@@ -12,7 +12,7 @@ pub fn parse(path: &Path) -> AST {
 
 #[repr(C)]
 struct Event {
-    tag: *mut c_char,
+    tag: *const c_char,
     text: *const c_char,
 }
 
