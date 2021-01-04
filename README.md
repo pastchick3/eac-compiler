@@ -4,6 +4,8 @@ A simple C compiler for learning, based on "Engineering a Compiler (the 2nd Edit
 
 [C grammar](https://github.com/antlr/grammars-v4)
 
+cargo test -- --test-threads=1
+
 ``` EBNF
 <non-digit> ::= "A" | "B" | "C" | "D" | "E" | "F" | "G"
                 | "H" | "I" | "J" | "K" | "L" | "M" | "N"

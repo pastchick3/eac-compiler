@@ -1,146 +1,267 @@
+use crate::ast::{Expression, Function, Program, Statement};
 use libc::{c_char, size_t};
 use std::ffi::CString;
-use std::path::Path;
-use crate::ast::AST;
 
-pub fn parse(path: &Path) -> AST {
-    let path = path.to_str().expect("Invalid input file path.");
-    let path = CString::new(path).expect("Invalid input file path.");
-    let events = unsafe { _parse(path.as_ptr()) };
-    AST {}
+static mut EVENTS: Vec<(String, String)> = Vec::new();
+
+pub fn parse(source: &str) -> Program {
+    let source = CString::new(source).unwrap().into_raw();
+    unsafe {
+        EVENTS.clear();
+        CString::from_raw(_parse(source, rs_get_str, rs_emit_event));
+    }
+    build_ast()
 }
 
-#[repr(C)]
-struct Event {
-    tag: *const c_char,
-    text: *const c_char,
+extern "C" fn rs_get_str(len: size_t) -> *mut c_char {
+    let mut s = String::new();
+    for _ in 0..len {
+        s.push(' ');
+    }
+    CString::new(s).unwrap().into_raw()
 }
 
-#[repr(C)]
-struct Events {
-    data: *mut Event,
-    len: size_t,
+extern "C" fn rs_emit_event(tag: *mut c_char, text: *mut c_char) {
+    unsafe {
+        let tag = CString::from_raw(tag).into_string().unwrap();
+        let text = CString::from_raw(text).into_string().unwrap();
+        EVENTS.push((tag, text));
+    }
 }
 
 #[link(name = "parser")]
 extern "C" {
-    pub fn _parse(path: *const c_char) -> Events;
+    fn _parse(
+        path: *const c_char,
+        rs_get_str: extern "C" fn(size_t) -> *mut c_char,
+        rs_emit_event: extern "C" fn(*mut c_char, *mut c_char),
+    ) -> *mut c_char;
 }
 
+fn build_ast() -> Program {
+    let mut program = Program::new();
+    let mut expr_stack = Vec::new();
+    let mut stmt_stack = Vec::new();
+    let mut compound_stmt_ptr = 0;
+    unsafe {
+        for (tag, text) in &EVENTS {
+            println!("{:?} - {:?} - {:?}", tag, text, expr_stack);
+            match tag.as_str() {
+                "ExitPrimaryExpression" => {
+                    let expr = match text.parse::<i32>() {
+                        Ok(num) => Expression::Number(num),
+                        Err(_) => Expression::Identifier(text.to_string()),
+                    };
+                    expr_stack.push(expr);
+                }
+                "ExitUnaryExpression" => {
+                    let expr = match text.as_str() {
+                        "!" => {
+                            let expr = expr_stack.pop().unwrap();
+                            Expression::Prefix {
+                                operator: "!",
+                                expression: Box::new(expr),
+                            }
+                        }
+                        op => panic!("Invalid prefix operator: {}", op),
+                    };
+                    expr_stack.push(expr);
+                }
+                "ExitPostfixExpression" => {
+                    let args = match expr_stack.last() {
+                        Some(Expression::Arguments(_)) => expr_stack.pop().unwrap(),
+                        _ => Expression::Arguments(Vec::new()),
+                    };
+                    let func = expr_stack.pop().unwrap();
+                    let call = Expression::Call {
+                        function: Box::new(func),
+                        arguments: Box::new(args),
+                    };
+                    expr_stack.push(call);
+                }
+                "ExitArgumentExpressionList" => {
+                    let arg = expr_stack.pop().unwrap();
+                    let args = match expr_stack.pop().unwrap() {
+                        Expression::Arguments(mut args) => {
+                            args.push(arg);
+                            args
+                        }
+                        expr => {
+                            expr_stack.push(expr);
+                            vec![arg]
+                        }
+                    };
+                    expr_stack.push(Expression::Arguments(args));
+                }
+                "EnterCompoundStatement" => {
+                    compound_stmt_ptr = stmt_stack.len();
+                }
+                "ExitCompoundStatement" => {
+                    let mut stmts = Vec::new();
+                    while stmt_stack.len() != compound_stmt_ptr {
+                        stmts.push(stmt_stack.pop().unwrap());
+                    }
+                    stmts.reverse();
+                    let stmt = Statement::Compound(stmts);
+                    stmt_stack.push(stmt);
+                }
+                "ExitExpressionStatement" => {
+                    let expr = expr_stack.pop().unwrap();
+                    let stmt = Statement::Expression(expr);
+                    stmt_stack.push(stmt);
+                }
+                "ExitFunctionDefinition" => {
+                    let mut sig = text.split(' ');
+                    let void = match sig.next().unwrap() {
+                        "void" => true,
+                        _ => false,
+                    };
+                    let name = sig.next().unwrap().to_string();
+                    let parameters = sig.map(|p| String::from(p)).rev().collect();
+                    let body = stmt_stack.pop().unwrap();
+                    let func = Function {
+                        void,
+                        name,
+                        parameters,
+                        body,
+                    };
+                    program.push(func);
+                }
+                s => panic!("Invalid event: {}", s),
+            }
+        }
+    }
+    program
+}
 
+#[cfg(test)]
+mod tests {
+    use super::*;
 
+    #[test]
+    fn expression_identifier() {
+        let program = parse(
+            "
+            int main() {
+                a;
+            }
+        ",
+        );
+        let expected = vec![Function {
+            void: false,
+            name: String::from("main"),
+            parameters: vec![],
+            body: Statement::Compound(vec![Statement::Expression(Expression::Identifier(
+                String::from("a"),
+            ))]),
+        }];
+        assert_eq!(program, expected);
+    }
 
-// use libc::{c_int, c_void, size_t};
+    #[test]
+    fn expression_number() {
+        let program = parse(
+            "
+            int main() {
+                1;
+            }
+        ",
+        );
+        let expected = vec![Function {
+            void: false,
+            name: String::from("main"),
+            parameters: vec![],
+            body: Statement::Compound(vec![Statement::Expression(Expression::Number(1))]),
+        }];
+        assert_eq!(program, expected);
+    }
 
-// type GraphPtr = *mut c_void;
+    #[test]
+    fn expression_call() {
+        let program = parse(
+            "
+            int main() {
+                f_1();
+                f_2(1);
+                f_3(1, 2);
+            }
+        ",
+        );
+        let expected = vec![Function {
+            void: false,
+            name: String::from("main"),
+            parameters: vec![],
+            body: Statement::Compound(vec![
+                Statement::Expression(Expression::Call {
+                    function: Box::new(Expression::Identifier(String::from("f_1"))),
+                    arguments: Box::new(Expression::Arguments(vec![])),
+                }),
+                Statement::Expression(Expression::Call {
+                    function: Box::new(Expression::Identifier(String::from("f_2"))),
+                    arguments: Box::new(Expression::Arguments(vec![Expression::Number(1)])),
+                }),
+                Statement::Expression(Expression::Call {
+                    function: Box::new(Expression::Identifier(String::from("f_3"))),
+                    arguments: Box::new(Expression::Arguments(vec![
+                        Expression::Number(1),
+                        Expression::Number(2),
+                    ])),
+                }),
+            ]),
+        }];
+        assert_eq!(program, expected);
+    }
 
-// #[repr(C)]
-// struct Edge {
-//     to: size_t,
-//     weight: c_int,
-// }
+    #[test]
+    fn expression_prefix() {
+        let program = parse(
+            "
+            int main() {
+                !1;
+            }
+        ",
+        );
+        let expected = vec![Function {
+            void: false,
+            name: String::from("main"),
+            parameters: vec![],
+            body: Statement::Compound(vec![Statement::Expression(Expression::Prefix {
+                operator: "!",
+                expression: Box::new(Expression::Number(1)),
+            })]),
+        }];
+        assert_eq!(program, expected);
+    }
 
-// #[repr(C)]
-// struct Edges {
-//     array: *mut Edge,
-//     size: size_t,
-// }
-
-// #[repr(C)]
-// struct Vertices {
-//     array: *mut size_t,
-//     size: size_t,
-// }
-
-// #[link(name = "graph", kind = "static")]
-// extern "C" {
-//     fn graph_ctor() -> GraphPtr;
-//     fn graph_dtor(graph_ptr: GraphPtr);
-//     fn graph_insert_vertex(graph_ptr: GraphPtr, vertex: size_t);
-//     fn graph_insert_edge(graph_ptr: GraphPtr, from: size_t, to: size_t, weight: c_int);
-//     fn graph_remove_vertex(graph_ptr: GraphPtr, vertex: size_t);
-//     fn graph_remove_edge(graph_ptr: GraphPtr, from: size_t, to: size_t);
-//     fn graph_get_vertex_number(graph_ptr: GraphPtr) -> size_t;
-//     fn graph_get_edge_number(graph_ptr: GraphPtr) -> size_t;
-//     fn graph_get_vertices(graph_ptr: GraphPtr) -> *const Vertices;
-//     fn graph_free_vertices(vertices: *const Vertices);
-//     fn graph_get_adjacent_edges(graph_ptr: GraphPtr, vertex: size_t) -> *const Edges;
-//     fn graph_free_edges(edges: *const Edges);
-// }
-
-// pub struct CppGraph {
-//     graph: GraphPtr,
-// }
-
-// impl Drop for CppGraph {
-//     fn drop(&mut self) {
-//         unsafe {
-//             graph_dtor(self.graph);
-//         }
-//     }
-// }
-
-// impl Default for CppGraph {
-//     fn default() -> Self {
-//         Self::new()
-//     }
-// }
-
-// impl CppGraph {
-//     pub fn new() -> Self {
-//         unsafe {
-//             CppGraph {
-//                 graph: graph_ctor(),
-//             }
-//         }
-//     }
-
-//     pub fn insert_vertex(&self, vertex: usize) {
-//         unsafe { graph_insert_vertex(self.graph, vertex) }
-//     }
-
-//     pub fn insert_edge(&self, from: usize, to: usize, weight: i32) {
-//         unsafe { graph_insert_edge(self.graph, from, to, weight) }
-//     }
-
-//     pub fn remove_vertex(&self, vertex: usize) {
-//         unsafe { graph_remove_vertex(self.graph, vertex) }
-//     }
-
-//     pub fn remove_edge(&self, from: usize, to: usize) {
-//         unsafe { graph_remove_edge(self.graph, from, to) }
-//     }
-
-//     pub fn get_vertex_number(&self) -> usize {
-//         unsafe { graph_get_vertex_number(self.graph) }
-//     }
-//     pub fn get_edge_number(&self) -> usize {
-//         unsafe { graph_get_edge_number(self.graph) }
-//     }
-
-//     pub fn get_vertices(&self) -> Vec<usize> {
-//         unsafe {
-//             let vertices = graph_get_vertices(self.graph);
-//             let mut vec = Vec::new();
-//             for i in 0..(*vertices).size {
-//                 let ptr = (*vertices).array.add(i);
-//                 vec.push(*ptr);
-//             }
-//             graph_free_vertices(vertices);
-//             vec
-//         }
-//     }
-
-//     pub fn get_adjacent_edges(&self, vertex: usize) -> Vec<(usize, i32)> {
-//         unsafe {
-//             let edges = graph_get_adjacent_edges(self.graph, vertex);
-//             let mut vec = Vec::new();
-//             for i in 0..(*edges).size {
-//                 let ptr = (*edges).array.add(i);
-//                 vec.push(((*ptr).to, (*ptr).weight));
-//             }
-//             graph_free_edges(edges);
-//             vec
-//         }
-//     }
-// }
+    #[test]
+    fn function() {
+        let program = parse(
+            "
+            int f_1() {}
+            void f_2(int a) {}
+            void f_3(int a, int b) {}
+        ",
+        );
+        let expected = vec![
+            Function {
+                void: false,
+                name: String::from("f_1"),
+                parameters: vec![],
+                body: Statement::Compound(vec![]),
+            },
+            Function {
+                void: true,
+                name: String::from("f_2"),
+                parameters: vec![String::from("a")],
+                body: Statement::Compound(vec![]),
+            },
+            Function {
+                void: true,
+                name: String::from("f_3"),
+                parameters: vec![String::from("a"), String::from("b")],
+                body: Statement::Compound(vec![]),
+            },
+        ];
+        assert_eq!(program, expected);
+    }
+}

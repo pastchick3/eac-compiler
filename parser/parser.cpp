@@ -1,78 +1,113 @@
-#include <fstream>
-#include <vector>
+#include <cstring>
 
 #include "CBaseListener.h"
 #include "CLexer.h"
 #include "CParser.h"
 #include "antlr4-runtime.h"
 
-extern "C" typedef struct {
-    const char *tag;
-    const char *text;
-} Event;
-
-extern "C" typedef struct {
-    Event *data;
-    size_t len;
-} Events;
+typedef char *(*RsGetStr)(size_t len);
+typedef void (*RsEmitEvent)(char *tag, char *text);
 
 class EventListener : public CBaseListener {
    public:
-    Event *getEventsPtr() { return this->events.data(); }
+    EventListener(RsGetStr rsGetStr, RsEmitEvent rsEmitEvent)
+        : rsGetStr(rsGetStr), rsEmitEvent(rsEmitEvent) {}
 
-    size_t getEventsSize() { return this->events.size(); }
-
-    void enterPrimaryExpression(
+    void exitPrimaryExpression(
         CParser::PrimaryExpressionContext *ctx) override {
-        this->emit_event("PrimaryExpression", ctx->getText().c_str());
+        this->emitEvent("ExitPrimaryExpression", ctx->getText().c_str());
     }
 
-    void enterPostfixExpression(
+    void exitUnaryExpression(CParser::UnaryExpressionContext *ctx) override {
+        if (auto op = ctx->unaryOperator()) {
+            this->emitEvent("ExitUnaryExpression", op->getText().c_str());
+        }
+    }
+
+    void exitPostfixExpression(
         CParser::PostfixExpressionContext *ctx) override {
-            std::cout << ctx->getText().c_str() << " - ";
-            if (ctx->argumentExpressionList()) {
-                std::cout << "yes" << std::endl;
-            } else {
-                std::cout << "no" << std::endl;
-            }
-        this->emit_event("EnterPostfixExpression", "");
+        if (ctx->LeftParen() || ctx->argumentExpressionList()) {
+            this->emitEvent("ExitPostfixExpression", "");
+        }
     }
 
-    void enterFunctionDefinition(
-        CParser::FunctionDefinitionContext *ctx) override {
-        this->emit_event("EnterFunction", "");
+    void exitArgumentExpressionList(
+        CParser::ArgumentExpressionListContext *ctx) override {
+        this->emitEvent("ExitArgumentExpressionList", "");
+    }
+
+    void enterCompoundStatement(
+        CParser::CompoundStatementContext *ctx) override {
+        this->emitEvent("EnterCompoundStatement", "");
+    }
+
+    void exitCompoundStatement(
+        CParser::CompoundStatementContext *ctx) override {
+        this->emitEvent("ExitCompoundStatement", "");
+    }
+
+    void exitExpressionStatement(
+        CParser::ExpressionStatementContext *ctx) override {
+        this->emitEvent("ExitExpressionStatement", "");
     }
 
     void exitFunctionDefinition(
         CParser::FunctionDefinitionContext *ctx) override {
-        this->emit_event("ExitFunction", "");
+        std::string sig;
+        if (ctx->declarationSpecifiers()
+                ->declarationSpecifier(0)
+                ->typeSpecifier()
+                ->Void()) {
+            sig.append("void");
+        } else {
+            sig.append("int");
+        }
+        sig.push_back(' ');
+        auto name = ctx->declarator()
+                        ->directDeclarator()
+                        ->directDeclarator()
+                        ->Identifier()
+                        ->getText();
+        sig.append(name);
+        if (auto param_list =
+                ctx->declarator()->directDeclarator()->parameterTypeList()) {
+            auto parameter = param_list->parameterList();
+            while (parameter) {
+                auto param = parameter->parameterDeclaration()
+                                 ->declarator()
+                                 ->directDeclarator()
+                                 ->getText();
+                sig.push_back(' ');
+                sig.append(param);
+                parameter = parameter->parameterList();
+            }
+        }
+        this->emitEvent("ExitFunctionDefinition", sig.c_str());
     }
 
    private:
-    std::vector<Event> events;
+    RsGetStr rsGetStr;
+    RsEmitEvent rsEmitEvent;
 
-    void emit_event(const char *tag, const char *text) {
-        Event event;
-        event.tag = tag;
-        event.text = text;
-        this->events.push_back(event);
+    void emitEvent(const char *tag, const char *text) {
+        auto rsTag{this->rsGetStr(std::strlen(tag))};
+        std::strcpy(rsTag, tag);
+        auto rsText{this->rsGetStr(std::strlen(text))};
+        std::strcpy(rsText, text);
+        this->rsEmitEvent(rsTag, rsText);
     }
 };
 
-extern "C" Events _parse(char *path) {
-    std::ifstream file;
-    file.open(path);
-    antlr4::ANTLRInputStream input(file);
-    CLexer lexer(&input);
-    antlr4::CommonTokenStream tokens(&lexer);
-    CParser parser(&tokens);
-    antlr4::tree::ParseTree *tree = parser.compilationUnit();
-    EventListener listener;
+extern "C" char *_parse(char *source, RsGetStr rsGetStr,
+                        RsEmitEvent rsEmitEvent) {
+    antlr4::ANTLRInputStream input{source};
+    CLexer lexer{&input};
+    antlr4::CommonTokenStream tokens{&lexer};
+    CParser parser{&tokens};
+    antlr4::tree::ParseTree *tree{parser.compilationUnit()};
+    EventListener listener{rsGetStr, rsEmitEvent};
     antlr4::tree::ParseTreeWalker::DEFAULT.walk(&listener, tree);
-    std::cout << tree->toStringTree(&parser) << std::endl;
-    file.close();
-    Events events;
-    events.data = listener.getEventsPtr();
-    events.len = listener.getEventsSize();
-    return events;
+    std::cout << tree->toStringTree(&parser)
+              << std::endl;  //-------------------delete
+    return source;
 }

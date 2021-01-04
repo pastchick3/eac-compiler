@@ -1,20 +1,18 @@
-mod parser;
 mod ast;
+mod parser;
 
-use std::path::Path;
 use crate::parser::parse;
 
-pub struct Compiler {
-    
-}
+pub struct Compiler {}
 
 impl Compiler {
     pub fn new() -> Self {
         Compiler {}
     }
 
-    pub fn run(&self, input: &Path, output: &Path) {
-        let ast = unsafe { parse(input) };
+    pub fn run(&self, source: &str) -> Vec<u8> {
+        let ast = parse(source);
         println!("{:#?}", ast);
+        Vec::new()
     }
 }
