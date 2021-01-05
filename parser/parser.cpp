@@ -15,12 +15,8 @@ class EventListener : public CBaseListener {
 
     void exitPrimaryExpression(
         CParser::PrimaryExpressionContext *ctx) override {
-        this->emitEvent("ExitPrimaryExpression", ctx->getText().c_str());
-    }
-
-    void exitUnaryExpression(CParser::UnaryExpressionContext *ctx) override {
-        if (auto op = ctx->unaryOperator()) {
-            this->emitEvent("ExitUnaryExpression", op->getText().c_str());
+        if (ctx->Identifier() || ctx->Constant()) {
+            this->emitEvent("ExitPrimaryExpression", ctx->getText().c_str());
         }
     }
 
@@ -34,6 +30,76 @@ class EventListener : public CBaseListener {
     void exitArgumentExpressionList(
         CParser::ArgumentExpressionListContext *ctx) override {
         this->emitEvent("ExitArgumentExpressionList", "");
+    }
+
+    void exitUnaryExpression(CParser::UnaryExpressionContext *ctx) override {
+        if (auto op = ctx->unaryOperator(); op && op->Not()) {
+            this->emitEvent("ExitUnaryExpression", "!");
+        }
+    }
+
+    void exitMultiplicativeExpression(
+        CParser::MultiplicativeExpressionContext *ctx) override {
+        if (ctx->Star()) {
+            this->emitEvent("ExitMultiplicativeExpression", "*");
+        } else if (ctx->Div()) {
+            this->emitEvent("ExitMultiplicativeExpression", "/");
+        }
+    }
+
+    void exitAdditiveExpression(
+        CParser::AdditiveExpressionContext *ctx) override {
+        if (ctx->Plus()) {
+            this->emitEvent("ExitAdditiveExpression", "+");
+        } else if (ctx->Minus()) {
+            this->emitEvent("ExitAdditiveExpression", "-");
+        }
+    }
+
+    void exitRelationalExpression(
+        CParser::RelationalExpressionContext *ctx) override {
+        if (ctx->Less()) {
+            this->emitEvent("ExitRelationalExpression", "<");
+        } else if (ctx->Greater()) {
+            this->emitEvent("ExitRelationalExpression", ">");
+        } else if (ctx->LessEqual()) {
+            this->emitEvent("ExitRelationalExpression", "<=");
+        } else if (ctx->GreaterEqual()) {
+            this->emitEvent("ExitRelationalExpression", ">=");
+        }
+    }
+
+    void exitEqualityExpression(
+        CParser::EqualityExpressionContext *ctx) override {
+        if (ctx->Equal()) {
+            this->emitEvent("ExitEqualityExpression", "==");
+        } else if (ctx->NotEqual()) {
+            this->emitEvent("ExitEqualityExpression", "!=");
+        }
+    }
+
+    void exitLogicalAndExpression(
+        CParser::LogicalAndExpressionContext *ctx) override {
+        if (ctx->AndAnd()) {
+            this->emitEvent("ExitLogicalAndExpression", "&&");
+        }
+    }
+
+    void exitLogicalOrExpression(
+        CParser::LogicalOrExpressionContext *ctx) override {
+        if (ctx->OrOr()) {
+            this->emitEvent("ExitLogicalOrExpression", "||");
+        }
+    }
+
+    void exitDeclaration(CParser::DeclarationContext *ctx) override {
+        this->emitEvent("ExitDeclaration", ctx->initDeclaratorList()
+                                               ->initDeclarator()
+                                               ->declarator()
+                                               ->directDeclarator()
+                                               ->Identifier()
+                                               ->getText()
+                                               .c_str());
     }
 
     void enterCompoundStatement(
@@ -51,9 +117,38 @@ class EventListener : public CBaseListener {
         this->emitEvent("ExitExpressionStatement", "");
     }
 
+    void exitSelectionStatement(
+        CParser::SelectionStatementContext *ctx) override {
+        if (ctx->If()) {
+            if (ctx->Else()) {
+                this->emitEvent("ExitSelectionStatement", "else");
+            } else {
+                this->emitEvent("ExitSelectionStatement", "");
+            }
+        }
+    }
+
+    void exitIterationStatement(
+        CParser::IterationStatementContext *ctx) override {
+        if (ctx->While()) {
+            this->emitEvent("ExitIterationStatement", "");
+        }
+    }
+
+    void exitJumpStatement(CParser::JumpStatementContext *ctx) override {
+        if (ctx->Return()) {
+            if (auto expr = ctx->expression()) {
+                this->emitEvent("ExitJumpStatement", "expr");
+            } else {
+                this->emitEvent("ExitJumpStatement", "");
+            }
+        }
+    }
+
     void exitFunctionDefinition(
         CParser::FunctionDefinitionContext *ctx) override {
         std::string sig;
+        // Determine the return type.
         if (ctx->declarationSpecifiers()
                 ->declarationSpecifier(0)
                 ->typeSpecifier()
@@ -62,6 +157,7 @@ class EventListener : public CBaseListener {
         } else {
             sig.append("int");
         }
+        // Determine the function name.
         sig.push_back(' ');
         auto name = ctx->declarator()
                         ->directDeclarator()
@@ -69,6 +165,7 @@ class EventListener : public CBaseListener {
                         ->Identifier()
                         ->getText();
         sig.append(name);
+        // Determine the argument list.
         if (auto param_list =
                 ctx->declarator()->directDeclarator()->parameterTypeList()) {
             auto parameter = param_list->parameterList();
@@ -107,7 +204,5 @@ extern "C" char *_parse(char *source, RsGetStr rsGetStr,
     antlr4::tree::ParseTree *tree{parser.compilationUnit()};
     EventListener listener{rsGetStr, rsEmitEvent};
     antlr4::tree::ParseTreeWalker::DEFAULT.walk(&listener, tree);
-    std::cout << tree->toStringTree(&parser)
-              << std::endl;  //-------------------delete
     return source;
 }

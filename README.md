@@ -21,7 +21,7 @@ cargo test -- --test-threads=1
 <number> ::= ["+" | "-"] <digit>+;
 
 
-<primary-expression> ::= <identifier> | <number>;
+<primary-expression> ::= <identifier> | <number> | "(" <expression> ")";
 <postfix-expression> ::= <primary-expression> | <postfix-expression> "(" <argument-list> ")";
 <argument-list> ::= <expression> | <argument-list> "," <expression>;
 <prefix-expression> ::= <postfix-expression> | "!" <postfix-expression>;

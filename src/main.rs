@@ -1,4 +1,4 @@
-use eac_compiler::Compiler;
+use eac_compiler::compile;
 use std::fs;
 use std::path::PathBuf;
 use structopt::StructOpt;
@@ -16,6 +16,6 @@ struct Opt {
 fn main() {
     let opt = Opt::from_args();
     let source = fs::read_to_string(opt.input).expect("Invalid input file path.");
-    let binary = Compiler::new().run(&source);
+    let binary = compile(&source);
     fs::write(opt.output, binary).expect("Invalid output file path.");
 }

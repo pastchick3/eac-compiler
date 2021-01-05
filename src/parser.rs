@@ -14,11 +14,9 @@ pub fn parse(source: &str) -> Program {
 }
 
 extern "C" fn rs_get_str(len: size_t) -> *mut c_char {
-    let mut s = String::new();
-    for _ in 0..len {
-        s.push(' ');
-    }
-    CString::new(s).unwrap().into_raw()
+    let mut v = Vec::new();
+    v.resize(len, 1);
+    CString::new(v).unwrap().into_raw()
 }
 
 extern "C" fn rs_emit_event(tag: *mut c_char, text: *mut c_char) {
@@ -42,28 +40,14 @@ fn build_ast() -> Program {
     let mut program = Program::new();
     let mut expr_stack = Vec::new();
     let mut stmt_stack = Vec::new();
-    let mut compound_stmt_ptr = 0;
+    let mut compound_stmt_stack = Vec::new();
     unsafe {
         for (tag, text) in &EVENTS {
-            println!("{:?} - {:?} - {:?}", tag, text, expr_stack);
             match tag.as_str() {
                 "ExitPrimaryExpression" => {
                     let expr = match text.parse::<i32>() {
                         Ok(num) => Expression::Number(num),
                         Err(_) => Expression::Identifier(text.to_string()),
-                    };
-                    expr_stack.push(expr);
-                }
-                "ExitUnaryExpression" => {
-                    let expr = match text.as_str() {
-                        "!" => {
-                            let expr = expr_stack.pop().unwrap();
-                            Expression::Prefix {
-                                operator: "!",
-                                expression: Box::new(expr),
-                            }
-                        }
-                        op => panic!("Invalid prefix operator: {}", op),
                     };
                     expr_stack.push(expr);
                 }
@@ -81,22 +65,47 @@ fn build_ast() -> Program {
                 }
                 "ExitArgumentExpressionList" => {
                     let arg = expr_stack.pop().unwrap();
-                    let args = match expr_stack.pop().unwrap() {
-                        Expression::Arguments(mut args) => {
+                    let args = match expr_stack.last_mut() {
+                        Some(Expression::Arguments(args)) => {
                             args.push(arg);
-                            args
+                            expr_stack.pop().unwrap()
                         }
-                        expr => {
-                            expr_stack.push(expr);
-                            vec![arg]
-                        }
+                        _ => Expression::Arguments(vec![arg]),
                     };
-                    expr_stack.push(Expression::Arguments(args));
+                    expr_stack.push(args);
+                }
+                "ExitUnaryExpression" => {
+                    let expr = expr_stack.pop().unwrap();
+                    let expr = Expression::Prefix {
+                        operator: text,
+                        expression: Box::new(expr),
+                    };
+                    expr_stack.push(expr);
+                }
+                "ExitMultiplicativeExpression"
+                | "ExitAdditiveExpression"
+                | "ExitRelationalExpression"
+                | "ExitEqualityExpression"
+                | "ExitLogicalAndExpression"
+                | "ExitLogicalOrExpression" => {
+                    let right = expr_stack.pop().unwrap();
+                    let left = expr_stack.pop().unwrap();
+                    let expr = Expression::Infix {
+                        left: Box::new(left),
+                        operator: text,
+                        right: Box::new(right),
+                    };
+                    expr_stack.push(expr);
+                }
+                "ExitDeclaration" => {
+                    let stmt = Statement::Declaration(Expression::Identifier(text.to_string()));
+                    stmt_stack.push(stmt);
                 }
                 "EnterCompoundStatement" => {
-                    compound_stmt_ptr = stmt_stack.len();
+                    compound_stmt_stack.push(stmt_stack.len());
                 }
                 "ExitCompoundStatement" => {
+                    let compound_stmt_ptr = compound_stmt_stack.pop().unwrap();
                     let mut stmts = Vec::new();
                     while stmt_stack.len() != compound_stmt_ptr {
                         stmts.push(stmt_stack.pop().unwrap());
@@ -110,14 +119,48 @@ fn build_ast() -> Program {
                     let stmt = Statement::Expression(expr);
                     stmt_stack.push(stmt);
                 }
+                "ExitSelectionStatement" => {
+                    let condition = expr_stack.pop().unwrap();
+                    let (body, alternative) = match text.is_empty() {
+                        true => {
+                            let body = stmt_stack.pop().unwrap();
+                            (body, None)
+                        }
+                        false => {
+                            let alternative = stmt_stack.pop().unwrap();
+                            let body = stmt_stack.pop().unwrap();
+                            (body, Some(Box::new(alternative)))
+                        }
+                    };
+                    let stmt = Statement::If {
+                        condition,
+                        body: Box::new(body),
+                        alternative,
+                    };
+                    stmt_stack.push(stmt);
+                }
+                "ExitIterationStatement" => {
+                    let condition = expr_stack.pop().unwrap();
+                    let body = stmt_stack.pop().unwrap();
+                    let stmt = Statement::While {
+                        condition,
+                        body: Box::new(body),
+                    };
+                    stmt_stack.push(stmt);
+                }
+                "ExitJumpStatement" => {
+                    let expr = match text.is_empty() {
+                        true => None,
+                        false => Some(expr_stack.pop().unwrap()),
+                    };
+                    let stmt = Statement::Return(expr);
+                    stmt_stack.push(stmt);
+                }
                 "ExitFunctionDefinition" => {
                     let mut sig = text.split(' ');
-                    let void = match sig.next().unwrap() {
-                        "void" => true,
-                        _ => false,
-                    };
+                    let void = matches!(sig.next().unwrap(), "void");
                     let name = sig.next().unwrap().to_string();
-                    let parameters = sig.map(|p| String::from(p)).rev().collect();
+                    let parameters = sig.map(String::from).rev().collect();
                     let body = stmt_stack.pop().unwrap();
                     let func = Function {
                         void,
@@ -229,6 +272,347 @@ mod tests {
                 operator: "!",
                 expression: Box::new(Expression::Number(1)),
             })]),
+        }];
+        assert_eq!(program, expected);
+    }
+
+    #[test]
+    fn expression_multiplicative() {
+        let program = parse(
+            "
+            int main() {
+                1 * 2 / 3;
+            }
+        ",
+        );
+        let expected = vec![Function {
+            void: false,
+            name: String::from("main"),
+            parameters: vec![],
+            body: Statement::Compound(vec![Statement::Expression(Expression::Infix {
+                left: Box::new(Expression::Infix {
+                    left: Box::new(Expression::Number(1)),
+                    operator: "*",
+                    right: Box::new(Expression::Number(2)),
+                }),
+                operator: "/",
+                right: Box::new(Expression::Number(3)),
+            })]),
+        }];
+        assert_eq!(program, expected);
+    }
+
+    #[test]
+    fn expression_additive() {
+        let program = parse(
+            "
+            int main() {
+                1 + 2 - 3;
+            }
+        ",
+        );
+        let expected = vec![Function {
+            void: false,
+            name: String::from("main"),
+            parameters: vec![],
+            body: Statement::Compound(vec![Statement::Expression(Expression::Infix {
+                left: Box::new(Expression::Infix {
+                    left: Box::new(Expression::Number(1)),
+                    operator: "+",
+                    right: Box::new(Expression::Number(2)),
+                }),
+                operator: "-",
+                right: Box::new(Expression::Number(3)),
+            })]),
+        }];
+        assert_eq!(program, expected);
+    }
+
+    #[test]
+    fn expression_relational() {
+        let program = parse(
+            "
+            int main() {
+                1 < 2 > 3 <= 4 >= 5;
+            }
+        ",
+        );
+        let expected = vec![Function {
+            void: false,
+            name: String::from("main"),
+            parameters: vec![],
+            body: Statement::Compound(vec![Statement::Expression(Expression::Infix {
+                left: Box::new(Expression::Infix {
+                    left: Box::new(Expression::Infix {
+                        left: Box::new(Expression::Infix {
+                            left: Box::new(Expression::Number(1)),
+                            operator: "<",
+                            right: Box::new(Expression::Number(2)),
+                        }),
+                        operator: ">",
+                        right: Box::new(Expression::Number(3)),
+                    }),
+                    operator: "<=",
+                    right: Box::new(Expression::Number(4)),
+                }),
+                operator: ">=",
+                right: Box::new(Expression::Number(5)),
+            })]),
+        }];
+        assert_eq!(program, expected);
+    }
+
+    #[test]
+    fn expression_equality() {
+        let program = parse(
+            "
+            int main() {
+                1 == 2 != 3;
+            }
+        ",
+        );
+        let expected = vec![Function {
+            void: false,
+            name: String::from("main"),
+            parameters: vec![],
+            body: Statement::Compound(vec![Statement::Expression(Expression::Infix {
+                left: Box::new(Expression::Infix {
+                    left: Box::new(Expression::Number(1)),
+                    operator: "==",
+                    right: Box::new(Expression::Number(2)),
+                }),
+                operator: "!=",
+                right: Box::new(Expression::Number(3)),
+            })]),
+        }];
+        assert_eq!(program, expected);
+    }
+
+    #[test]
+    fn expression_logical_and() {
+        let program = parse(
+            "
+            int main() {
+                1 && 2;
+            }
+        ",
+        );
+        let expected = vec![Function {
+            void: false,
+            name: String::from("main"),
+            parameters: vec![],
+            body: Statement::Compound(vec![Statement::Expression(Expression::Infix {
+                left: Box::new(Expression::Number(1)),
+                operator: "&&",
+                right: Box::new(Expression::Number(2)),
+            })]),
+        }];
+        assert_eq!(program, expected);
+    }
+
+    #[test]
+    fn expression_logical_or() {
+        let program = parse(
+            "
+            int main() {
+                1 || 2;
+            }
+        ",
+        );
+        let expected = vec![Function {
+            void: false,
+            name: String::from("main"),
+            parameters: vec![],
+            body: Statement::Compound(vec![Statement::Expression(Expression::Infix {
+                left: Box::new(Expression::Number(1)),
+                operator: "||",
+                right: Box::new(Expression::Number(2)),
+            })]),
+        }];
+        assert_eq!(program, expected);
+    }
+
+    #[test]
+    fn expression_precedence() {
+        let program = parse(
+            "
+            int main() {
+                1 || 2 && 3 == 4 < 5 + 6 * !f();
+            }
+        ",
+        );
+        let expected = vec![Function {
+            void: false,
+            name: String::from("main"),
+            parameters: vec![],
+            body: Statement::Compound(vec![Statement::Expression(Expression::Infix {
+                left: Box::new(Expression::Number(1)),
+                operator: "||",
+                right: Box::new(Expression::Infix {
+                    left: Box::new(Expression::Number(2)),
+                    operator: "&&",
+                    right: Box::new(Expression::Infix {
+                        left: Box::new(Expression::Number(3)),
+                        operator: "==",
+                        right: Box::new(Expression::Infix {
+                            left: Box::new(Expression::Number(4)),
+                            operator: "<",
+                            right: Box::new(Expression::Infix {
+                                left: Box::new(Expression::Number(5)),
+                                operator: "+",
+                                right: Box::new(Expression::Infix {
+                                    left: Box::new(Expression::Number(6)),
+                                    operator: "*",
+                                    right: Box::new(Expression::Prefix {
+                                        operator: "!",
+                                        expression: Box::new(Expression::Call {
+                                            function: Box::new(Expression::Identifier(
+                                                String::from("f"),
+                                            )),
+                                            arguments: Box::new(Expression::Arguments(vec![])),
+                                        }),
+                                    }),
+                                }),
+                            }),
+                        }),
+                    }),
+                }),
+            })]),
+        }];
+        assert_eq!(program, expected);
+    }
+
+    #[test]
+    fn expression_group() {
+        let program = parse(
+            "
+            int main() {
+                (1 + 2) * 3;
+            }
+        ",
+        );
+        let expected = vec![Function {
+            void: false,
+            name: String::from("main"),
+            parameters: vec![],
+            body: Statement::Compound(vec![Statement::Expression(Expression::Infix {
+                left: Box::new(Expression::Infix {
+                    left: Box::new(Expression::Number(1)),
+                    operator: "+",
+                    right: Box::new(Expression::Number(2)),
+                }),
+                operator: "*",
+                right: Box::new(Expression::Number(3)),
+            })]),
+        }];
+        assert_eq!(program, expected);
+    }
+
+    #[test]
+    fn statement_declaration() {
+        let program = parse(
+            "
+            int main() {
+                int a;
+            }
+        ",
+        );
+        let expected = vec![Function {
+            void: false,
+            name: String::from("main"),
+            parameters: vec![],
+            body: Statement::Compound(vec![Statement::Declaration(Expression::Identifier(
+                String::from("a"),
+            ))]),
+        }];
+        assert_eq!(program, expected);
+    }
+
+    #[test]
+    fn statement_if() {
+        let program = parse(
+            "
+            int main() {
+                if (1) {
+                    2;
+                }
+                if (3) {
+                    4;
+                } else {
+                    5;
+                }
+            }
+        ",
+        );
+        let expected = vec![Function {
+            void: false,
+            name: String::from("main"),
+            parameters: vec![],
+            body: Statement::Compound(vec![
+                Statement::If {
+                    condition: Expression::Number(1),
+                    body: Box::new(Statement::Compound(vec![Statement::Expression(
+                        Expression::Number(2),
+                    )])),
+                    alternative: None,
+                },
+                Statement::If {
+                    condition: Expression::Number(3),
+                    body: Box::new(Statement::Compound(vec![Statement::Expression(
+                        Expression::Number(4),
+                    )])),
+                    alternative: Some(Box::new(Statement::Compound(vec![Statement::Expression(
+                        Expression::Number(5),
+                    )]))),
+                },
+            ]),
+        }];
+        assert_eq!(program, expected);
+    }
+
+    #[test]
+    fn statement_while() {
+        let program = parse(
+            "
+            int main() {
+                while (1) {
+                    2;
+                }
+            }
+        ",
+        );
+        let expected = vec![Function {
+            void: false,
+            name: String::from("main"),
+            parameters: vec![],
+            body: Statement::Compound(vec![Statement::While {
+                condition: Expression::Number(1),
+                body: Box::new(Statement::Compound(vec![Statement::Expression(
+                    Expression::Number(2),
+                )])),
+            }]),
+        }];
+        assert_eq!(program, expected);
+    }
+
+    #[test]
+    fn statement_return() {
+        let program = parse(
+            "
+            int main() {
+                return;
+                return 1;
+            }
+        ",
+        );
+        let expected = vec![Function {
+            void: false,
+            name: String::from("main"),
+            parameters: vec![],
+            body: Statement::Compound(vec![
+                Statement::Return(None),
+                Statement::Return(Some(Expression::Number(1))),
+            ]),
         }];
         assert_eq!(program, expected);
     }
