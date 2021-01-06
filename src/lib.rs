@@ -1,9 +1,10 @@
-mod ast;
+mod ir;
 mod parser;
-
-use crate::parser::parse;
+mod ssa;
 
 pub fn compile(source: &str) -> Vec<u8> {
-    let ast = parse(source);
+    let ast = parser::parse(source);
+    let ssa = ssa::build_ssa(ast);
+    println!("{:#?}", ssa);
     Vec::new()
 }

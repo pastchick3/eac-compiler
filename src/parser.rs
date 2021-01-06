@@ -1,4 +1,4 @@
-use crate::ast::{Expression, Function, Program, Statement};
+use crate::ir::{Expression, Function, Program, Statement};
 use libc::{c_char, size_t};
 use std::ffi::CString;
 
