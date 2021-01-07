@@ -183,7 +183,7 @@ mod tests {
 
     #[test]
     fn expression_identifier() {
-        let program = parse(
+        let ast = parse(
             "
             int main() {
                 a;
@@ -198,12 +198,12 @@ mod tests {
                 String::from("a"),
             ))]),
         }];
-        assert_eq!(program, expected);
+        assert_eq!(ast, expected);
     }
 
     #[test]
     fn expression_number() {
-        let program = parse(
+        let ast = parse(
             "
             int main() {
                 1;
@@ -216,12 +216,12 @@ mod tests {
             parameters: vec![],
             body: Statement::Compound(vec![Statement::Expression(Expression::Number(1))]),
         }];
-        assert_eq!(program, expected);
+        assert_eq!(ast, expected);
     }
 
     #[test]
     fn expression_call() {
-        let program = parse(
+        let ast = parse(
             "
             int main() {
                 f_1();
@@ -252,12 +252,12 @@ mod tests {
                 }),
             ]),
         }];
-        assert_eq!(program, expected);
+        assert_eq!(ast, expected);
     }
 
     #[test]
     fn expression_prefix() {
-        let program = parse(
+        let ast = parse(
             "
             int main() {
                 !1;
@@ -273,12 +273,12 @@ mod tests {
                 expression: Box::new(Expression::Number(1)),
             })]),
         }];
-        assert_eq!(program, expected);
+        assert_eq!(ast, expected);
     }
 
     #[test]
     fn expression_multiplicative() {
-        let program = parse(
+        let ast = parse(
             "
             int main() {
                 1 * 2 / 3;
@@ -299,12 +299,12 @@ mod tests {
                 right: Box::new(Expression::Number(3)),
             })]),
         }];
-        assert_eq!(program, expected);
+        assert_eq!(ast, expected);
     }
 
     #[test]
     fn expression_additive() {
-        let program = parse(
+        let ast = parse(
             "
             int main() {
                 1 + 2 - 3;
@@ -325,12 +325,12 @@ mod tests {
                 right: Box::new(Expression::Number(3)),
             })]),
         }];
-        assert_eq!(program, expected);
+        assert_eq!(ast, expected);
     }
 
     #[test]
     fn expression_relational() {
-        let program = parse(
+        let ast = parse(
             "
             int main() {
                 1 < 2 > 3 <= 4 >= 5;
@@ -359,12 +359,12 @@ mod tests {
                 right: Box::new(Expression::Number(5)),
             })]),
         }];
-        assert_eq!(program, expected);
+        assert_eq!(ast, expected);
     }
 
     #[test]
     fn expression_equality() {
-        let program = parse(
+        let ast = parse(
             "
             int main() {
                 1 == 2 != 3;
@@ -385,12 +385,12 @@ mod tests {
                 right: Box::new(Expression::Number(3)),
             })]),
         }];
-        assert_eq!(program, expected);
+        assert_eq!(ast, expected);
     }
 
     #[test]
     fn expression_logical_and() {
-        let program = parse(
+        let ast = parse(
             "
             int main() {
                 1 && 2;
@@ -407,12 +407,12 @@ mod tests {
                 right: Box::new(Expression::Number(2)),
             })]),
         }];
-        assert_eq!(program, expected);
+        assert_eq!(ast, expected);
     }
 
     #[test]
     fn expression_logical_or() {
-        let program = parse(
+        let ast = parse(
             "
             int main() {
                 1 || 2;
@@ -429,12 +429,12 @@ mod tests {
                 right: Box::new(Expression::Number(2)),
             })]),
         }];
-        assert_eq!(program, expected);
+        assert_eq!(ast, expected);
     }
 
     #[test]
     fn expression_precedence() {
-        let program = parse(
+        let ast = parse(
             "
             int main() {
                 1 || 2 && 3 == 4 < 5 + 6 * !f();
@@ -479,12 +479,12 @@ mod tests {
                 }),
             })]),
         }];
-        assert_eq!(program, expected);
+        assert_eq!(ast, expected);
     }
 
     #[test]
     fn expression_group() {
-        let program = parse(
+        let ast = parse(
             "
             int main() {
                 (1 + 2) * 3;
@@ -505,12 +505,12 @@ mod tests {
                 right: Box::new(Expression::Number(3)),
             })]),
         }];
-        assert_eq!(program, expected);
+        assert_eq!(ast, expected);
     }
 
     #[test]
     fn statement_declaration() {
-        let program = parse(
+        let ast = parse(
             "
             int main() {
                 int a;
@@ -525,12 +525,12 @@ mod tests {
                 String::from("a"),
             ))]),
         }];
-        assert_eq!(program, expected);
+        assert_eq!(ast, expected);
     }
 
     #[test]
     fn statement_if() {
-        let program = parse(
+        let ast = parse(
             "
             int main() {
                 if (1) {
@@ -567,12 +567,12 @@ mod tests {
                 },
             ]),
         }];
-        assert_eq!(program, expected);
+        assert_eq!(ast, expected);
     }
 
     #[test]
     fn statement_while() {
-        let program = parse(
+        let ast = parse(
             "
             int main() {
                 while (1) {
@@ -592,12 +592,12 @@ mod tests {
                 )])),
             }]),
         }];
-        assert_eq!(program, expected);
+        assert_eq!(ast, expected);
     }
 
     #[test]
     fn statement_return() {
-        let program = parse(
+        let ast = parse(
             "
             int main() {
                 return;
@@ -614,12 +614,12 @@ mod tests {
                 Statement::Return(Some(Expression::Number(1))),
             ]),
         }];
-        assert_eq!(program, expected);
+        assert_eq!(ast, expected);
     }
 
     #[test]
     fn function() {
-        let program = parse(
+        let ast = parse(
             "
             int f_1() {}
             void f_2(int a) {}
@@ -646,6 +646,6 @@ mod tests {
                 body: Statement::Compound(vec![]),
             },
         ];
-        assert_eq!(program, expected);
+        assert_eq!(ast, expected);
     }
 }

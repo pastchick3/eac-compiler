@@ -1,9 +1,7 @@
-// Build a cfg -> Gather initial information -> Solve the equations to produce LiveOut(b) for each block b
+use crate::ir::{CFGBuilder, Function, Program, SSAFunction, SSAProgram, Statement};
 
-use crate::ir::{Function, Program, SSAFunction, SSAProgram, Statement, CFG};
-
-pub fn build_ssa(ast: Program) -> SSAProgram {
-    ast.into_iter().map(build_cfg).collect()
+pub fn build(ast: Program) -> SSAProgram {
+    ast.into_iter().map(build_cfg).map(build_ssa).collect()
 }
 
 fn build_cfg(func: Function) -> SSAFunction {
@@ -13,17 +11,21 @@ fn build_cfg(func: Function) -> SSAFunction {
         parameters,
         body,
     } = func;
-    let mut cfg = CFG::new();
-    _build_cfg(body, &mut cfg);
+    let mut cfg_builder = CFGBuilder::new();
+    _build_cfg(body, &mut cfg_builder);
     SSAFunction {
         void,
         name,
         parameters,
-        body: cfg,
+        body: cfg_builder.get_cfg(),
     }
 }
 
-fn _build_cfg(stmt: Statement, cfg: &mut CFG) -> bool {
+fn build_ssa(func: SSAFunction) -> SSAFunction {
+    func
+}
+
+fn _build_cfg(stmt: Statement, cfg: &mut CFGBuilder) -> bool {
     match stmt {
         Statement::Nop => unreachable!(),
         stmt @ Statement::Declaration(_) => cfg.push(stmt),
@@ -62,10 +64,8 @@ fn _build_cfg(stmt: Statement, cfg: &mut CFG) -> bool {
         }
         Statement::While { condition, body } => {
             cfg.enter_while(condition);
-            if _build_cfg(*body, cfg) {
-                return true;
-            }
-            cfg.exit_while();
+            let body_return = _build_cfg(*body, cfg);
+            cfg.exit_while(body_return);
         }
         stmt @ Statement::Return(_) => {
             cfg.push(stmt);
@@ -73,4 +73,247 @@ fn _build_cfg(stmt: Statement, cfg: &mut CFG) -> bool {
         }
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ir::{Block, Expression};
+    use crate::parser;
+
+    #[test]
+    fn cfg_linear() {
+        let mut ast = parser::parse(
+            "
+            int main() {
+                int a;
+                {}
+                {
+                    1;
+                }
+            }
+        ",
+        );
+        let cfg = build_cfg(ast.remove(0));
+        let expected = SSAFunction {
+            void: false,
+            name: String::from("main"),
+            parameters: vec![],
+            body: vec![
+                Block {
+                    statements: vec![Statement::Declaration(Expression::Identifier(
+                        String::from("a"),
+                    ))],
+                    predecessors: vec![].into_iter().collect(),
+                    successors: vec![1].into_iter().collect(),
+                },
+                Block {
+                    statements: vec![Statement::Expression(Expression::Number(1))],
+                    predecessors: vec![0].into_iter().collect(),
+                    successors: vec![2].into_iter().collect(),
+                },
+                Block {
+                    statements: vec![],
+                    predecessors: vec![1].into_iter().collect(),
+                    successors: vec![].into_iter().collect(),
+                },
+            ],
+        };
+        assert_eq!(cfg, expected);
+    }
+
+    #[test]
+    fn cfg_if() {
+        let mut ast = parser::parse(
+            "
+            int main() {
+                if (0) {
+                    1;
+                } else {
+                    2;
+                }
+                if (3) {
+                    4
+                }
+                if (5) {} else {}
+                if (6) {}
+            }
+        ",
+        );
+        let cfg = build_cfg(ast.remove(0));
+        let expected = SSAFunction {
+            void: false,
+            name: String::from("main"),
+            parameters: vec![],
+            body: vec![
+                Block {
+                    statements: vec![Statement::If {
+                        condition: Expression::Number(0),
+                        body: Box::new(Statement::Nop),
+                        alternative: None,
+                    }],
+                    predecessors: vec![].into_iter().collect(),
+                    successors: vec![1, 2].into_iter().collect(),
+                },
+                Block {
+                    statements: vec![Statement::Expression(Expression::Number(1))],
+                    predecessors: vec![0].into_iter().collect(),
+                    successors: vec![3].into_iter().collect(),
+                },
+                Block {
+                    statements: vec![Statement::Expression(Expression::Number(2))],
+                    predecessors: vec![0].into_iter().collect(),
+                    successors: vec![3].into_iter().collect(),
+                },
+                Block {
+                    statements: vec![Statement::If {
+                        condition: Expression::Number(3),
+                        body: Box::new(Statement::Nop),
+                        alternative: None,
+                    }],
+                    predecessors: vec![1, 2].into_iter().collect(),
+                    successors: vec![4, 5].into_iter().collect(),
+                },
+                Block {
+                    statements: vec![Statement::Expression(Expression::Number(4))],
+                    predecessors: vec![3].into_iter().collect(),
+                    successors: vec![5].into_iter().collect(),
+                },
+                Block {
+                    statements: vec![Statement::If {
+                        condition: Expression::Number(5),
+                        body: Box::new(Statement::Nop),
+                        alternative: None,
+                    }],
+                    predecessors: vec![3, 4].into_iter().collect(),
+                    successors: vec![6].into_iter().collect(),
+                },
+                Block {
+                    statements: vec![Statement::If {
+                        condition: Expression::Number(6),
+                        body: Box::new(Statement::Nop),
+                        alternative: None,
+                    }],
+                    predecessors: vec![5].into_iter().collect(),
+                    successors: vec![7].into_iter().collect(),
+                },
+                Block {
+                    statements: vec![],
+                    predecessors: vec![6].into_iter().collect(),
+                    successors: vec![].into_iter().collect(),
+                },
+            ],
+        };
+        assert_eq!(cfg, expected);
+    }
+
+    #[test]
+    fn cfg_while() {
+        let mut ast = parser::parse(
+            "
+            int main() {
+                while (0) {
+                    1;
+                }
+                while (2) {}
+            }
+        ",
+        );
+        let cfg = build_cfg(ast.remove(0));
+        let expected = SSAFunction {
+            void: false,
+            name: String::from("main"),
+            parameters: vec![],
+            body: vec![
+                Block {
+                    statements: vec![Statement::While {
+                        condition: Expression::Number(0),
+                        body: Box::new(Statement::Nop),
+                    }],
+                    predecessors: vec![1].into_iter().collect(),
+                    successors: vec![1, 2].into_iter().collect(),
+                },
+                Block {
+                    statements: vec![Statement::Expression(Expression::Number(1))],
+                    predecessors: vec![0].into_iter().collect(),
+                    successors: vec![0].into_iter().collect(),
+                },
+                Block {
+                    statements: vec![Statement::While {
+                        condition: Expression::Number(2),
+                        body: Box::new(Statement::Nop),
+                    }],
+                    predecessors: vec![0, 2].into_iter().collect(),
+                    successors: vec![2, 3].into_iter().collect(),
+                },
+                Block {
+                    statements: vec![],
+                    predecessors: vec![2].into_iter().collect(),
+                    successors: vec![].into_iter().collect(),
+                },
+            ],
+        };
+        assert_eq!(cfg, expected);
+    }
+
+    #[test]
+    fn cfg_return() {
+        let mut ast = parser::parse(
+            "
+            int main() {
+                if (0) {
+                    return 1;
+                }
+                while (2) {
+                    return 3;
+                }
+                {
+                    return 4;
+                }
+                5;
+            }
+        ",
+        );
+        let cfg = build_cfg(ast.remove(0));
+        let expected = SSAFunction {
+            void: false,
+            name: String::from("main"),
+            parameters: vec![],
+            body: vec![
+                Block {
+                    statements: vec![Statement::If {
+                        condition: Expression::Number(0),
+                        body: Box::new(Statement::Nop),
+                        alternative: None,
+                    }],
+                    predecessors: vec![].into_iter().collect(),
+                    successors: vec![1, 2].into_iter().collect(),
+                },
+                Block {
+                    statements: vec![Statement::Return(Some(Expression::Number(1)))],
+                    predecessors: vec![0].into_iter().collect(),
+                    successors: vec![2].into_iter().collect(),
+                },
+                Block {
+                    statements: vec![Statement::While {
+                        condition: Expression::Number(2),
+                        body: Box::new(Statement::Nop),
+                    }],
+                    predecessors: vec![0, 1].into_iter().collect(),
+                    successors: vec![3, 4].into_iter().collect(),
+                },
+                Block {
+                    statements: vec![Statement::Return(Some(Expression::Number(3)))],
+                    predecessors: vec![2].into_iter().collect(),
+                    successors: vec![].into_iter().collect(),
+                },
+                Block {
+                    statements: vec![Statement::Return(Some(Expression::Number(4)))],
+                    predecessors: vec![2].into_iter().collect(),
+                    successors: vec![].into_iter().collect(),
+                },
+            ],
+        };
+        assert_eq!(cfg, expected);
+    }
 }

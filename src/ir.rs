@@ -57,8 +57,20 @@ pub struct Block {
     pub successors: HashSet<usize>,
 }
 
+pub type CFG = Vec<Block>;
+
 #[derive(Debug, PartialEq)]
-pub struct CFG {
+pub struct SSAFunction {
+    pub void: bool,
+    pub name: String,
+    pub parameters: Vec<String>,
+    pub body: CFG,
+}
+
+pub type SSAProgram = Vec<SSAFunction>;
+
+#[derive(Debug, PartialEq)]
+pub struct CFGBuilder {
     blocks: Vec<Block>,
     current: usize,
     while_cond: usize,
@@ -70,9 +82,9 @@ pub struct CFG {
     if_exit_alt: usize,
 }
 
-impl CFG {
+impl CFGBuilder {
     pub fn new() -> Self {
-        CFG {
+        CFGBuilder {
             blocks: vec![Block::default()],
             current: 0,
             while_cond: 0,
@@ -85,14 +97,16 @@ impl CFG {
         }
     }
 
+    pub fn get_cfg(self) -> CFG {
+        self.blocks
+    }
+
     pub fn push(&mut self, stmt: Statement) {
         self.blocks[self.current].statements.push(stmt);
     }
 
-    pub fn enter_new_block(&mut self) -> bool {
-        if self.blocks[self.current].statements.is_empty() {
-            false
-        } else {
+    pub fn enter_new_block(&mut self) {
+        if !self.blocks[self.current].statements.is_empty() {
             self.blocks[self.current]
                 .successors
                 .insert(self.current + 1);
@@ -100,22 +114,17 @@ impl CFG {
             block.predecessors.insert(self.current);
             self.blocks.push(block);
             self.current += 1;
-            true
         }
     }
 
     fn connect(&mut self, pred: usize, succ: usize) {
-        if pred != succ {
-            self.blocks[pred].successors.insert(succ);
-            self.blocks[succ].predecessors.insert(pred);
-        }
+        self.blocks[pred].successors.insert(succ);
+        self.blocks[succ].predecessors.insert(pred);
     }
 
     fn disconnect(&mut self, pred: usize, succ: usize) {
-        if pred != succ {
-            self.blocks[pred].successors.remove(&succ);
-            self.blocks[succ].predecessors.remove(&pred);
-        }
+        self.blocks[pred].successors.remove(&succ);
+        self.blocks[succ].predecessors.remove(&pred);
     }
 
     pub fn enter_if(&mut self, condition: Expression) {
@@ -152,13 +161,13 @@ impl CFG {
     }
 
     pub fn exit_if(&mut self) {
+        self.enter_new_block();
         self.connect(self.if_exit_body, self.current);
         if self.if_alt {
             self.connect(self.if_cond, self.if_enter_alt);
         } else {
             self.connect(self.if_cond, self.current);
         }
-        self.if_alt = false;
         self.enter_new_block();
     }
 
@@ -173,21 +182,13 @@ impl CFG {
         self.enter_new_block();
     }
 
-    pub fn exit_while(&mut self) {
-        self.blocks[self.current].successors.insert(self.while_cond);
-        self.blocks[self.while_cond]
-            .predecessors
-            .insert(self.current);
+    pub fn exit_while(&mut self, body_return: bool) {
         self.enter_new_block();
+        let while_exit_body = self.current - 1;
+        if !body_return {
+            self.connect(while_exit_body, self.while_cond);
+        }
+        self.disconnect(while_exit_body, self.current);
+        self.connect(self.while_cond, self.current);
     }
 }
-
-#[derive(Debug, PartialEq)]
-pub struct SSAFunction {
-    pub void: bool,
-    pub name: String,
-    pub parameters: Vec<String>,
-    pub body: CFG,
-}
-
-pub type SSAProgram = Vec<SSAFunction>;
