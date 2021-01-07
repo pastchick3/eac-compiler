@@ -33,8 +33,12 @@ class EventListener : public CBaseListener {
     }
 
     void exitUnaryExpression(CParser::UnaryExpressionContext *ctx) override {
-        if (auto op = ctx->unaryOperator(); op && op->Not()) {
-            this->emitEvent("ExitUnaryExpression", "!");
+        if (auto op = ctx->unaryOperator()) {
+            if (op->Not()) {
+                this->emitEvent("ExitUnaryExpression", "!");
+            } else if (op->Minus()) {
+                this->emitEvent("ExitUnaryExpression", "-");
+            }
         }
     }
 
@@ -82,6 +86,13 @@ class EventListener : public CBaseListener {
         CParser::LogicalAndExpressionContext *ctx) override {
         if (ctx->AndAnd()) {
             this->emitEvent("ExitLogicalAndExpression", "&&");
+        }
+    }
+
+    void exitAssignmentExpression(
+        CParser::AssignmentExpressionContext *ctx) override {
+        if (auto op = ctx->assignmentOperator(); op && op->Assign()) {
+            this->emitEvent("ExitAssignmentExpression", "=");
         }
     }
 

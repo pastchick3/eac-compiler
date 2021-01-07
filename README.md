@@ -26,7 +26,7 @@ Build a cfg -> Gather initial information -> Solve the equations to produce Live
 <primary-expression> ::= <identifier> | <number> | "(" <expression> ")";
 <postfix-expression> ::= <primary-expression> | <postfix-expression> "(" <argument-list> ")";
 <argument-list> ::= <expression> | <argument-list> "," <expression>;
-<prefix-expression> ::= <postfix-expression> | "!" <postfix-expression>;
+<prefix-expression> ::= <postfix-expression> | "!" <postfix-expression> | "-" <postfix-expression>;
 <multiplicative-expression> ::= <prefix-expression>
                             | <multiplicative-expression> "*" <prefix-expression>
                             | <multiplicative-expression> "/" <prefix-expression>;
@@ -45,7 +45,8 @@ Build a cfg -> Gather initial information -> Solve the equations to produce Live
                             | <logical-AND-expression> "&&" <equality-expression>;
 <logical-OR-expression> ::= <logical-AND-expression>
                             | <logical-OR-expression> "||" <logical-AND-expression>;
-<expression> ::= <logical-OR-expression>;
+<assignment-expression> ::= <identifier> "=" <logical-OR-expression>;
+<expression> ::= <assignment-expression>;
 
 
 <statement> ::= <declaration-statement>

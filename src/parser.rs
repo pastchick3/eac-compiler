@@ -1,4 +1,4 @@
-use crate::ir::{Expression, Function, Program, Statement};
+use crate::ir::{Expression, Function, Program, SSAVar, Statement};
 use libc::{c_char, size_t};
 use std::ffi::CString;
 
@@ -47,7 +47,7 @@ fn build_ast() -> Program {
                 "ExitPrimaryExpression" => {
                     let expr = match text.parse::<i32>() {
                         Ok(num) => Expression::Number(num),
-                        Err(_) => Expression::Identifier(text.to_string()),
+                        Err(_) => Expression::Identifier(SSAVar::new(text)),
                     };
                     expr_stack.push(expr);
                 }
@@ -87,7 +87,8 @@ fn build_ast() -> Program {
                 | "ExitRelationalExpression"
                 | "ExitEqualityExpression"
                 | "ExitLogicalAndExpression"
-                | "ExitLogicalOrExpression" => {
+                | "ExitLogicalOrExpression"
+                | "ExitAssignmentExpression" => {
                     let right = expr_stack.pop().unwrap();
                     let left = expr_stack.pop().unwrap();
                     let expr = Expression::Infix {
@@ -98,7 +99,7 @@ fn build_ast() -> Program {
                     expr_stack.push(expr);
                 }
                 "ExitDeclaration" => {
-                    let stmt = Statement::Declaration(Expression::Identifier(text.to_string()));
+                    let stmt = Statement::Declaration(Expression::Identifier(SSAVar::new(text)));
                     stmt_stack.push(stmt);
                 }
                 "EnterCompoundStatement" => {
@@ -160,7 +161,7 @@ fn build_ast() -> Program {
                     let mut sig = text.split(' ');
                     let void = matches!(sig.next().unwrap(), "void");
                     let name = sig.next().unwrap().to_string();
-                    let parameters = sig.map(String::from).rev().collect();
+                    let parameters = sig.map(SSAVar::new).rev().collect();
                     let body = stmt_stack.pop().unwrap();
                     let func = Function {
                         void,
@@ -195,7 +196,7 @@ mod tests {
             name: String::from("main"),
             parameters: vec![],
             body: Statement::Compound(vec![Statement::Expression(Expression::Identifier(
-                String::from("a"),
+                SSAVar::new("a"),
             ))]),
         }];
         assert_eq!(ast, expected);
@@ -236,15 +237,15 @@ mod tests {
             parameters: vec![],
             body: Statement::Compound(vec![
                 Statement::Expression(Expression::Call {
-                    function: Box::new(Expression::Identifier(String::from("f_1"))),
+                    function: Box::new(Expression::Identifier(SSAVar::new("f_1"))),
                     arguments: Box::new(Expression::Arguments(vec![])),
                 }),
                 Statement::Expression(Expression::Call {
-                    function: Box::new(Expression::Identifier(String::from("f_2"))),
+                    function: Box::new(Expression::Identifier(SSAVar::new("f_2"))),
                     arguments: Box::new(Expression::Arguments(vec![Expression::Number(1)])),
                 }),
                 Statement::Expression(Expression::Call {
-                    function: Box::new(Expression::Identifier(String::from("f_3"))),
+                    function: Box::new(Expression::Identifier(SSAVar::new("f_3"))),
                     arguments: Box::new(Expression::Arguments(vec![
                         Expression::Number(1),
                         Expression::Number(2),
@@ -260,7 +261,7 @@ mod tests {
         let ast = parse(
             "
             int main() {
-                !1;
+                !-1;
             }
         ",
         );
@@ -270,7 +271,10 @@ mod tests {
             parameters: vec![],
             body: Statement::Compound(vec![Statement::Expression(Expression::Prefix {
                 operator: "!",
-                expression: Box::new(Expression::Number(1)),
+                expression: Box::new(Expression::Prefix {
+                    operator: "-",
+                    expression: Box::new(Expression::Number(1)),
+                }),
             })]),
         }];
         assert_eq!(ast, expected);
@@ -433,11 +437,11 @@ mod tests {
     }
 
     #[test]
-    fn expression_precedence() {
+    fn expression_assign() {
         let ast = parse(
             "
             int main() {
-                1 || 2 && 3 == 4 < 5 + 6 * !f();
+                a = 1;
             }
         ",
         );
@@ -446,30 +450,56 @@ mod tests {
             name: String::from("main"),
             parameters: vec![],
             body: Statement::Compound(vec![Statement::Expression(Expression::Infix {
-                left: Box::new(Expression::Number(1)),
-                operator: "||",
+                left: Box::new(Expression::Identifier(SSAVar::new("a"))),
+                operator: "=",
+                right: Box::new(Expression::Number(1)),
+            })]),
+        }];
+        assert_eq!(ast, expected);
+    }
+
+    #[test]
+    fn expression_precedence() {
+        let ast = parse(
+            "
+            int main() {
+                a = 1 || 2 && 3 == 4 < 5 + 6 * !f();
+            }
+        ",
+        );
+        let expected = vec![Function {
+            void: false,
+            name: String::from("main"),
+            parameters: vec![],
+            body: Statement::Compound(vec![Statement::Expression(Expression::Infix {
+                left: Box::new(Expression::Identifier(SSAVar::new("a"))),
+                operator: "=",
                 right: Box::new(Expression::Infix {
-                    left: Box::new(Expression::Number(2)),
-                    operator: "&&",
+                    left: Box::new(Expression::Number(1)),
+                    operator: "||",
                     right: Box::new(Expression::Infix {
-                        left: Box::new(Expression::Number(3)),
-                        operator: "==",
+                        left: Box::new(Expression::Number(2)),
+                        operator: "&&",
                         right: Box::new(Expression::Infix {
-                            left: Box::new(Expression::Number(4)),
-                            operator: "<",
+                            left: Box::new(Expression::Number(3)),
+                            operator: "==",
                             right: Box::new(Expression::Infix {
-                                left: Box::new(Expression::Number(5)),
-                                operator: "+",
+                                left: Box::new(Expression::Number(4)),
+                                operator: "<",
                                 right: Box::new(Expression::Infix {
-                                    left: Box::new(Expression::Number(6)),
-                                    operator: "*",
-                                    right: Box::new(Expression::Prefix {
-                                        operator: "!",
-                                        expression: Box::new(Expression::Call {
-                                            function: Box::new(Expression::Identifier(
-                                                String::from("f"),
-                                            )),
-                                            arguments: Box::new(Expression::Arguments(vec![])),
+                                    left: Box::new(Expression::Number(5)),
+                                    operator: "+",
+                                    right: Box::new(Expression::Infix {
+                                        left: Box::new(Expression::Number(6)),
+                                        operator: "*",
+                                        right: Box::new(Expression::Prefix {
+                                            operator: "!",
+                                            expression: Box::new(Expression::Call {
+                                                function: Box::new(Expression::Identifier(
+                                                    SSAVar::new("f"),
+                                                )),
+                                                arguments: Box::new(Expression::Arguments(vec![])),
+                                            }),
                                         }),
                                     }),
                                 }),
@@ -522,7 +552,7 @@ mod tests {
             name: String::from("main"),
             parameters: vec![],
             body: Statement::Compound(vec![Statement::Declaration(Expression::Identifier(
-                String::from("a"),
+                SSAVar::new("a"),
             ))]),
         }];
         assert_eq!(ast, expected);
@@ -636,13 +666,13 @@ mod tests {
             Function {
                 void: true,
                 name: String::from("f_2"),
-                parameters: vec![String::from("a")],
+                parameters: vec![SSAVar::new("a")],
                 body: Statement::Compound(vec![]),
             },
             Function {
                 void: true,
                 name: String::from("f_3"),
-                parameters: vec![String::from("a"), String::from("b")],
+                parameters: vec![SSAVar::new("a"), SSAVar::new("b")],
                 body: Statement::Compound(vec![]),
             },
         ];

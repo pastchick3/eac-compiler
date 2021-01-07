@@ -2,8 +2,23 @@ use std::collections::HashSet;
 
 // IR used in the parser.
 #[derive(Debug, PartialEq)]
+pub struct SSAVar {
+    pub name: String,
+    pub subscript: Option<usize>,
+}
+
+impl SSAVar {
+    pub fn new(name: &str) -> Self {
+        SSAVar {
+            name: name.to_string(),
+            subscript: None,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
 pub enum Expression {
-    Identifier(String),
+    Identifier(SSAVar),
     Number(i32),
     Call {
         function: Box<Expression>,
@@ -23,7 +38,8 @@ pub enum Expression {
 
 #[derive(Debug, PartialEq)]
 pub enum Statement {
-    Nop, // For CFG use only.
+    Nop,                      // For CFG use only.
+    Phi(String, Vec<String>), // For SSA use only.
     Declaration(Expression),
     Compound(Vec<Statement>),
     Expression(Expression),
@@ -43,7 +59,7 @@ pub enum Statement {
 pub struct Function {
     pub void: bool,
     pub name: String,
-    pub parameters: Vec<String>,
+    pub parameters: Vec<SSAVar>,
     pub body: Statement,
 }
 
@@ -63,7 +79,7 @@ pub type CFG = Vec<Block>;
 pub struct SSAFunction {
     pub void: bool,
     pub name: String,
-    pub parameters: Vec<String>,
+    pub parameters: Vec<SSAVar>,
     pub body: CFG,
 }
 
