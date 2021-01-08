@@ -6,7 +6,7 @@ A simple C compiler for learning, based on "Engineering a Compiler (the 2nd Edit
 
 cargo test -- --test-threads=1
 
-Build a cfg -> Gather initial information -> Solve the equations to produce LiveOut(b) for each block b
+Compounds statments inside functions will not produce new scopes, so we can construct complex data flow from simple program structures.
 
 ``` EBNF
 <non-digit> ::= "A" | "B" | "C" | "D" | "E" | "F" | "G"

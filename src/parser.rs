@@ -14,9 +14,7 @@ pub fn parse(source: &str) -> Program {
 }
 
 extern "C" fn rs_get_str(len: size_t) -> *mut c_char {
-    let mut v = Vec::new();
-    v.resize(len, 1);
-    CString::new(v).unwrap().into_raw()
+    CString::new(vec![1; len]).unwrap().into_raw()
 }
 
 extern "C" fn rs_emit_event(tag: *mut c_char, text: *mut c_char) {

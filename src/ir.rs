@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 // IR used in the parser.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct SSAVar {
     pub name: String,
     pub subscript: Option<usize>,
@@ -38,8 +38,8 @@ pub enum Expression {
 
 #[derive(Debug, PartialEq)]
 pub enum Statement {
-    Nop,                      // For CFG use only.
-    Phi(String, Vec<String>), // For SSA use only.
+    Nop,                          // For CFG use only.
+    Phi(SSAVar, HashSet<SSAVar>), // For SSA use only.
     Declaration(Expression),
     Compound(Vec<Statement>),
     Expression(Expression),
