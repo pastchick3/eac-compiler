@@ -4,11 +4,35 @@ use crate::ir::{
 };
 use std::collections::{HashMap, HashSet};
 
-pub fn build(ast: Program) -> SSAProgram {
-    ast.into_iter().map(build_cfg).map(build_ssa).collect()
+pub fn construct(ast: Program) -> SSAProgram {
+    ast.into_iter()
+        .map(construct_cfg)
+        .map(construct_ssa)
+        .collect()
 }
 
-fn build_cfg(func: Function) -> SSAFunction {
+pub fn destruct(ssa: SSAProgram) -> SSAProgram {
+    ssa.into_iter()
+        .map(
+            |SSAFunction {
+                 void,
+                 name,
+                 parameters,
+                 body,
+             }| {
+                let body = _destruct(&parameters, body);
+                SSAFunction {
+                    void,
+                    name,
+                    parameters,
+                    body,
+                }
+            },
+        )
+        .collect()
+}
+
+fn construct_cfg(func: Function) -> SSAFunction {
     let Function {
         void,
         name,
@@ -16,7 +40,7 @@ fn build_cfg(func: Function) -> SSAFunction {
         body,
     } = func;
     let mut cfg_builder = CFGBuilder::new();
-    _build_cfg(body, &mut cfg_builder);
+    _construct_cfg(body, &mut cfg_builder);
     SSAFunction {
         void,
         name,
@@ -25,7 +49,7 @@ fn build_cfg(func: Function) -> SSAFunction {
     }
 }
 
-fn _build_cfg(stmt: Statement, cfg: &mut CFGBuilder) -> bool {
+fn _construct_cfg(stmt: Statement, cfg: &mut CFGBuilder) -> bool {
     match stmt {
         Statement::Nop => unreachable!(),
         Statement::Phi(_, _) => unreachable!(),
@@ -33,7 +57,7 @@ fn _build_cfg(stmt: Statement, cfg: &mut CFGBuilder) -> bool {
         Statement::Compound(stmts) => {
             cfg.enter_new_block();
             for stmt in stmts {
-                if _build_cfg(stmt, cfg) {
+                if _construct_cfg(stmt, cfg) {
                     return true;
                 }
             }
@@ -47,12 +71,12 @@ fn _build_cfg(stmt: Statement, cfg: &mut CFGBuilder) -> bool {
         } => {
             cfg.enter_if(condition);
             cfg.enter_if_body();
-            let body_return = _build_cfg(*body, cfg);
+            let body_return = _construct_cfg(*body, cfg);
             cfg.exit_if_body();
             let alt_return = match alternative {
                 Some(alt) => {
                     cfg.enter_if_alt();
-                    let alt_return = _build_cfg(*alt, cfg);
+                    let alt_return = _construct_cfg(*alt, cfg);
                     cfg.exit_if_alt();
                     alt_return
                 }
@@ -65,7 +89,7 @@ fn _build_cfg(stmt: Statement, cfg: &mut CFGBuilder) -> bool {
         }
         Statement::While { condition, body } => {
             cfg.enter_while(condition);
-            let body_return = _build_cfg(*body, cfg);
+            let body_return = _construct_cfg(*body, cfg);
             cfg.exit_while(body_return);
         }
         stmt @ Statement::Return(_) => {
@@ -76,7 +100,7 @@ fn _build_cfg(stmt: Statement, cfg: &mut CFGBuilder) -> bool {
     false
 }
 
-fn build_ssa(func: SSAFunction) -> SSAFunction {
+fn construct_ssa(func: SSAFunction) -> SSAFunction {
     let SSAFunction {
         void,
         name,
@@ -84,8 +108,8 @@ fn build_ssa(func: SSAFunction) -> SSAFunction {
         mut body,
     } = func;
     insert_phi(&mut body);
-    let reaching_def = find_reaching_def(&mut parameters, &mut body);
-    rename_ssa(reaching_def, &mut body);
+    let reaching_def = find_reaching_defs(&mut parameters, &mut body);
+    rename_ssa(&reaching_def, &mut body);
     SSAFunction {
         void,
         name,
@@ -176,11 +200,11 @@ fn find_expr_vars(expr: &Expression, vars: &mut Vec<String>) {
 
 type ReachingMap = HashMap<String, HashSet<usize>>;
 
-fn find_reaching_def(parameters: &mut Vec<SSAVar>, body: &mut CFG) -> Vec<ReachingMap> {
+fn find_reaching_defs(parameters: &mut Vec<SSAVar>, body: &mut CFG) -> Vec<ReachingMap> {
     let mut def_map = HashMap::new();
     let mut reaches = vec![ReachingMap::new(); body.len()];
     let mut de_defs = vec![HashMap::new(); body.len()];
-    let mut def_kills = vec![HashSet::new(); body.len()];
+    let mut def_kills = vec![HashMap::new(); body.len()];
     for SSAVar { name, subscript } in parameters {
         let current_subscript = def_map.entry(name.to_string()).or_default();
         *subscript = Some(*current_subscript);
@@ -203,7 +227,7 @@ fn find_reaching_def(parameters: &mut Vec<SSAVar>, body: &mut CFG) -> Vec<Reachi
                     Some(_) => de_def.remove(name),
                     None => de_def.insert(name.to_string(), *current_subscript),
                 };
-                def_kill.insert(name.to_string());
+                def_kill.insert(name.to_string(), *current_subscript);
                 *current_subscript += 1;
             }
         }
@@ -215,8 +239,8 @@ fn find_reaching_def(parameters: &mut Vec<SSAVar>, body: &mut CFG) -> Vec<Reachi
             let preds = find_predecessors(body, i);
             for pred in preds {
                 let mut fall_through = reaches[pred].clone();
-                for killed in &def_kills[pred] {
-                    fall_through.remove(killed);
+                for name in def_kills[pred].keys() {
+                    fall_through.remove(name);
                 }
                 for (name, subs) in fall_through {
                     reaches[i].entry(name).or_default().extend(subs);
@@ -240,11 +264,11 @@ fn find_predecessors(body: &[Block], index: usize) -> HashSet<usize> {
     predecessors
 }
 
-fn rename_ssa(reaching_maps: Vec<ReachingMap>, body: &mut CFG) {
+fn rename_ssa(reaching_maps: &[ReachingMap], body: &mut CFG) {
     for (block, reaching_map) in body.iter_mut().zip(reaching_maps) {
         let mut var_map = HashMap::new();
         for stmt in &mut block.statements {
-            rename_stmt_vars(stmt, &reaching_map, &mut var_map);
+            rename_stmt_vars(stmt, reaching_map, &mut var_map);
         }
     }
 }
@@ -342,6 +366,96 @@ fn rename_expr_vars(
     }
 }
 
+fn _destruct(parameters: &[SSAVar], mut body: CFG) -> CFG {
+    let leaves = find_leaving_defs(parameters, &body);
+    let mut copys = vec![Vec::new(); body.len()];
+    for block in &mut body {
+        while let Some(Statement::Phi(_, _)) = block.statements.first() {
+            if let Statement::Phi(var, _) = block.statements.remove(0) {
+                for pred in &block.predecessors {
+                    if let Some(sub) = leaves[*pred].get(&var.name) {
+                        let copy = Statement::Expression(Expression::Infix {
+                            left: Box::new(Expression::Identifier(var.clone())),
+                            operator: "=",
+                            right: Box::new(Expression::Identifier(SSAVar {
+                                name: var.name.to_string(),
+                                subscript: Some(*sub),
+                            })),
+                        });
+                        copys[*pred].push(copy);
+                    }
+                }
+            }
+        }
+    }
+    for (block, stmts) in body.iter_mut().zip(copys) {
+        block.statements.extend(stmts);
+    }
+    body
+}
+
+type LeavingMap = HashMap<String, usize>;
+
+fn find_leaving_defs(parameters: &[SSAVar], body: &[Block]) -> Vec<LeavingMap> {
+    let mut reaches = vec![ReachingMap::new(); body.len()];
+    let mut de_defs = vec![HashMap::new(); body.len()];
+    let mut def_kills = vec![HashMap::new(); body.len()];
+    for SSAVar { name, subscript } in parameters {
+        reaches[0].insert(
+            name.to_string(),
+            vec![subscript.unwrap()].into_iter().collect(),
+        );
+    }
+    for i in 0..body.len() {
+        let de_def = &mut de_defs[i];
+        let def_kill = &mut def_kills[i];
+        for stmt in &body[i].statements {
+            if let Statement::Phi(SSAVar { name, subscript }, ..)
+            | Statement::Declaration(Expression::Identifier(SSAVar { name, subscript })) = stmt
+            {
+                match de_def.get(name) {
+                    Some(_) => de_def.remove(name),
+                    None => de_def.insert(name.to_string(), subscript.unwrap()),
+                };
+                def_kill.insert(name.to_string(), subscript.unwrap());
+            }
+        }
+    }
+    let mut old_reaches = Vec::new();
+    while old_reaches != reaches {
+        old_reaches = reaches.clone();
+        for i in 0..body.len() {
+            let preds = find_predecessors(body, i);
+            for pred in preds {
+                let mut fall_through = reaches[pred].clone();
+                for name in def_kills[pred].keys() {
+                    fall_through.remove(name);
+                }
+                for (name, subs) in fall_through {
+                    reaches[i].entry(name).or_default().extend(subs);
+                }
+                for (name, sub) in de_defs[pred].clone() {
+                    reaches[i].entry(name).or_default().insert(sub);
+                }
+            }
+        }
+    }
+    let mut leaves = Vec::new();
+    for reach in reaches {
+        let mut leave = HashMap::new();
+        for (name, subs) in reach {
+            leave.insert(name, subs.into_iter().next().unwrap());
+        }
+        leaves.push(leave);
+    }
+    for (leave, def_kill) in leaves.iter_mut().zip(def_kills) {
+        for (name, sub) in def_kill {
+            leave.insert(name, sub);
+        }
+    }
+    leaves
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -361,7 +475,7 @@ mod tests {
             }
         ",
         );
-        let cfg = build_cfg(ast.remove(0));
+        let cfg = construct_cfg(ast.remove(0));
         let expected = SSAFunction {
             void: false,
             name: String::from("main"),
@@ -407,7 +521,7 @@ mod tests {
             }
         ",
         );
-        let cfg = build_cfg(ast.remove(0));
+        let cfg = construct_cfg(ast.remove(0));
         let expected = SSAFunction {
             void: false,
             name: String::from("main"),
@@ -486,7 +600,7 @@ mod tests {
             }
         ",
         );
-        let cfg = build_cfg(ast.remove(0));
+        let cfg = construct_cfg(ast.remove(0));
         let expected = SSAFunction {
             void: false,
             name: String::from("main"),
@@ -541,7 +655,7 @@ mod tests {
             }
         ",
         );
-        let cfg = build_cfg(ast.remove(0));
+        let cfg = construct_cfg(ast.remove(0));
         let expected = SSAFunction {
             void: false,
             name: String::from("main"),
@@ -597,8 +711,8 @@ mod tests {
             }
         ",
         );
-        let mut ssa = build_cfg(ast.remove(0));
-        find_reaching_def(&mut ssa.parameters, &mut ssa.body);
+        let mut ssa = construct_cfg(ast.remove(0));
+        find_reaching_defs(&mut ssa.parameters, &mut ssa.body);
         let expected = SSAFunction {
             void: true,
             name: String::from("main"),
@@ -649,7 +763,7 @@ mod tests {
     }
 
     #[test]
-    fn ssa() {
+    fn construct() {
         let mut ast = parser::parse(
             "
             void main(int a) {
@@ -662,8 +776,8 @@ mod tests {
             }
         ",
         );
-        let cfg = build_cfg(ast.remove(0));
-        let ssa = build_ssa(cfg);
+        let cfg = construct_cfg(ast.remove(0));
+        let ssa = construct_ssa(cfg);
         let expected = SSAFunction {
             void: true,
             name: String::from("main"),
@@ -763,5 +877,127 @@ mod tests {
             ],
         };
         assert_eq!(ssa, expected);
+    }
+
+    #[test]
+    fn destruct() {
+        let mut ast = parser::parse(
+            "
+            void main(int a) {
+                int b;
+                if (0) {
+                    int b;
+                }
+                main(a);
+                b;
+            }
+        ",
+        );
+        let cfg = construct_cfg(ast.remove(0));
+        let ssa = construct_ssa(cfg);
+        let body = _destruct(&ssa.parameters, ssa.body);
+        let expected = vec![
+            Block {
+                statements: vec![Statement::Declaration(Expression::Identifier(SSAVar {
+                    name: "b".to_string(),
+                    subscript: Some(0),
+                }))],
+                predecessors: vec![].into_iter().collect(),
+                successors: vec![1].into_iter().collect(),
+            },
+            Block {
+                statements: vec![
+                    Statement::If {
+                        condition: Expression::Number(0),
+                        body: Box::new(Statement::Nop),
+                        alternative: None,
+                    },
+                    Statement::Expression(Expression::Infix {
+                        left: Box::new(Expression::Identifier(SSAVar {
+                            name: "b".to_string(),
+                            subscript: Some(2),
+                        })),
+                        operator: "=",
+                        right: Box::new(Expression::Identifier(SSAVar {
+                            name: "b".to_string(),
+                            subscript: Some(0),
+                        })),
+                    }),
+                    Statement::Expression(Expression::Infix {
+                        left: Box::new(Expression::Identifier(SSAVar {
+                            name: "a".to_string(),
+                            subscript: Some(1),
+                        })),
+                        operator: "=",
+                        right: Box::new(Expression::Identifier(SSAVar {
+                            name: "a".to_string(),
+                            subscript: Some(0),
+                        })),
+                    }),
+                ],
+                predecessors: vec![0].into_iter().collect(),
+                successors: vec![2, 3].into_iter().collect(),
+            },
+            Block {
+                statements: vec![
+                    Statement::Declaration(Expression::Identifier(SSAVar {
+                        name: "b".to_string(),
+                        subscript: Some(1),
+                    })),
+                    Statement::Expression(Expression::Infix {
+                        left: Box::new(Expression::Identifier(SSAVar {
+                            name: "b".to_string(),
+                            subscript: Some(2),
+                        })),
+                        operator: "=",
+                        right: Box::new(Expression::Identifier(SSAVar {
+                            name: "b".to_string(),
+                            subscript: Some(1),
+                        })),
+                    }),
+                    Statement::Expression(Expression::Infix {
+                        left: Box::new(Expression::Identifier(SSAVar {
+                            name: "a".to_string(),
+                            subscript: Some(1),
+                        })),
+                        operator: "=",
+                        right: Box::new(Expression::Identifier(SSAVar {
+                            name: "a".to_string(),
+                            subscript: Some(0),
+                        })),
+                    }),
+                ],
+                predecessors: vec![1].into_iter().collect(),
+                successors: vec![3].into_iter().collect(),
+            },
+            Block {
+                statements: vec![
+                    Statement::Expression(Expression::Call {
+                        function: Box::new(Expression::Identifier(SSAVar {
+                            name: "main".to_string(),
+                            subscript: None,
+                        })),
+                        arguments: Box::new(Expression::Arguments(vec![Expression::Identifier(
+                            SSAVar {
+                                name: "a".to_string(),
+                                subscript: Some(1),
+                            },
+                        )])),
+                    }),
+                    Statement::Expression(Expression::Identifier(SSAVar {
+                        name: "b".to_string(),
+                        subscript: Some(2),
+                    })),
+                ],
+                predecessors: vec![1, 2].into_iter().collect(),
+                successors: vec![4].into_iter().collect(),
+            },
+            Block {
+                statements: vec![],
+                predecessors: vec![3].into_iter().collect(),
+                successors: vec![].into_iter().collect(),
+            },
+        ];
+        assert_eq!(body, expected);
     }
 }

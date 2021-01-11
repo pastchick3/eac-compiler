@@ -16,7 +16,7 @@ impl SSAVar {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Expression {
     Identifier(SSAVar),
     Number(i32),
@@ -36,7 +36,7 @@ pub enum Expression {
     },
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Statement {
     Nop,                          // For CFG use only.
     Phi(SSAVar, HashSet<SSAVar>), // For SSA use only.
