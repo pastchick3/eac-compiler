@@ -8,6 +8,9 @@ cargo test -- --test-threads=1
 
 Compounds statments inside functions will not produce new scopes, so we can construct complex data flow from simple program structures.
 
+https://software.intel.com/content/www/us/en/develop/articles/introduction-to-x64-assembly.html
+
+
 ``` EBNF
 <non-digit> ::= "A" | "B" | "C" | "D" | "E" | "F" | "G"
                 | "H" | "I" | "J" | "K" | "L" | "M" | "N"
