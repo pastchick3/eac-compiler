@@ -8,6 +8,8 @@ cargo test -- --test-threads=1
 
 Compounds statments inside functions will not produce new scopes, so we can construct complex data flow from simple program structures.
 
+parser is not thread safe
+
 https://software.intel.com/content/www/us/en/develop/articles/introduction-to-x64-assembly.html
 
 
