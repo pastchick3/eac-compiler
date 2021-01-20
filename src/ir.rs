@@ -143,12 +143,16 @@ impl CFGBuilder {
         self.blocks[succ].predecessors.remove(&pred);
     }
 
-    pub fn enter_if(&mut self, condition: Expression) {
+    pub fn enter_if(&mut self, condition: Expression, alt: bool) {
         self.enter_new_block();
+        let alternative = match alt {
+            true => Some(Box::new(Statement::Nop)),
+            false => None,
+        };
         let stmt = Statement::If {
             condition,
             body: Box::new(Statement::Nop),
-            alternative: None,
+            alternative,
         };
         self.push(stmt);
         self.if_cond = self.current;

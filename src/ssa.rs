@@ -69,7 +69,7 @@ fn _construct_cfg(stmt: Statement, cfg: &mut CFGBuilder) -> bool {
             body,
             alternative,
         } => {
-            cfg.enter_if(condition);
+            cfg.enter_if(condition, alternative.is_some());
             cfg.enter_if_body();
             let body_return = _construct_cfg(*body, cfg);
             cfg.exit_if_body();
@@ -531,7 +531,7 @@ mod tests {
                     statements: vec![Statement::If {
                         condition: Expression::Number(0),
                         body: Box::new(Statement::Nop),
-                        alternative: None,
+                        alternative: Some(Box::new(Statement::Nop)),
                     }],
                     predecessors: vec![].into_iter().collect(),
                     successors: vec![1, 2].into_iter().collect(),
@@ -564,7 +564,7 @@ mod tests {
                     statements: vec![Statement::If {
                         condition: Expression::Number(5),
                         body: Box::new(Statement::Nop),
-                        alternative: None,
+                        alternative: Some(Box::new(Statement::Nop)),
                     }],
                     predecessors: vec![3, 4].into_iter().collect(),
                     successors: vec![6].into_iter().collect(),

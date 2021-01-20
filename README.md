@@ -12,6 +12,35 @@ parser is not thread safe
 
 https://software.intel.com/content/www/us/en/develop/articles/introduction-to-x64-assembly.html
 
+# If No Alt (IfNoAlt)
+cond
+    false jump TagS
+
+body
+
+    TagS
+next
+
+# If Alt (IfBody, IfAlt)
+cond
+    false jump TagS
+
+body
+    jump TagE
+
+    TagS
+alt
+    TagE
+
+# While (WhileBody)
+    TagS
+cond
+    false jump tagE
+
+body
+    jump TagS
+    TagE
+
 
 ``` EBNF
 <non-digit> ::= "A" | "B" | "C" | "D" | "E" | "F" | "G"
