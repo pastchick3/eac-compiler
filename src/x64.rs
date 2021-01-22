@@ -18,9 +18,15 @@ impl RegisterBuilder {
     }
 
     pub fn from_var(&mut self, var: SSAVar) -> Register {
-        let reg = *self.var_map.entry(var).or_insert(self.count);
-        self.count += 1;
-        reg
+        match self.var_map.get(&var) {
+            Some(reg) => *reg,
+            None => {
+                let reg = self.count;
+                self.count += 1;
+                self.var_map.insert(var, reg);
+                reg
+            }
+        }
     }
 
     pub fn create_temp(&mut self) -> Register {

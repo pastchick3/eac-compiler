@@ -40,7 +40,7 @@ pub enum Expression {
 pub enum Statement {
     Nop,                          // For CFG use only.
     Phi(SSAVar, HashSet<SSAVar>), // For SSA use only.
-    Declaration(Expression),
+    Declaration(SSAVar),
     Compound(Vec<Statement>),
     Expression(Expression),
     If {

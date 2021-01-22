@@ -97,7 +97,7 @@ fn build_ast() -> Program {
                     expr_stack.push(expr);
                 }
                 "ExitDeclaration" => {
-                    let stmt = Statement::Declaration(Expression::Identifier(SSAVar::new(text)));
+                    let stmt = Statement::Declaration(SSAVar::new(text));
                     stmt_stack.push(stmt);
                 }
                 "EnterCompoundStatement" => {
@@ -549,9 +549,7 @@ mod tests {
             void: false,
             name: String::from("main"),
             parameters: vec![],
-            body: Statement::Compound(vec![Statement::Declaration(Expression::Identifier(
-                SSAVar::new("a"),
-            ))]),
+            body: Statement::Compound(vec![Statement::Declaration(SSAVar::new("a"))]),
         }];
         assert_eq!(ast, expected);
     }

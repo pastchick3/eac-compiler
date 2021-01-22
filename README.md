@@ -12,14 +12,14 @@ parser is not thread safe
 
 https://software.intel.com/content/www/us/en/develop/articles/introduction-to-x64-assembly.html
 
+cfg truncate early return
+
 # If No Alt (IfNoAlt)
 cond
-    false jump TagS
+    false jump TagE
 
 body
-
-    TagS
-next
+    TagE
 
 # If Alt (IfBody, IfAlt)
 cond

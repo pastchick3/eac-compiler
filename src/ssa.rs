@@ -138,10 +138,8 @@ fn find_stmt_vars(stmt: &Statement, vars: &mut Vec<String>) {
     match stmt {
         Statement::Nop => {}
         Statement::Phi(_, _) => unreachable!(),
-        Statement::Declaration(expr) => {
-            if let Expression::Identifier(var) = expr {
-                vars.push(var.name.to_string());
-            }
+        Statement::Declaration(SSAVar { name, .. }) => {
+            vars.push(name.to_string());
         }
         Statement::Compound(stmts) => {
             for stmt in stmts {
@@ -219,7 +217,7 @@ fn find_reaching_defs(parameters: &mut Vec<SSAVar>, body: &mut CFG) -> Vec<Reach
         let def_kill = &mut def_kills[i];
         for stmt in &mut body[i].statements {
             if let Statement::Phi(SSAVar { name, subscript }, ..)
-            | Statement::Declaration(Expression::Identifier(SSAVar { name, subscript })) = stmt
+            | Statement::Declaration(SSAVar { name, subscript }) = stmt
             {
                 let current_subscript = def_map.entry(name.to_string()).or_default();
                 *subscript = Some(*current_subscript);
@@ -251,6 +249,7 @@ fn find_reaching_defs(parameters: &mut Vec<SSAVar>, body: &mut CFG) -> Vec<Reach
             }
         }
     }
+    println!("in while");
     reaches
 }
 
@@ -258,8 +257,12 @@ fn find_predecessors(body: &[Block], index: usize) -> HashSet<usize> {
     let mut predecessors = HashSet::new();
     let mut stack = vec![index];
     while let Some(pred) = stack.pop() {
-        predecessors.extend(body[pred].predecessors.clone());
-        stack.extend(body[pred].predecessors.clone());
+        let preds = &body[pred].predecessors;
+        if preds.is_subset(&predecessors) {
+            break;
+        }
+        predecessors.extend(preds.clone());
+        stack.extend(preds.clone());
     }
     predecessors
 }
@@ -293,10 +296,8 @@ fn rename_stmt_vars(
             }
             var_map.insert(var.name.to_string(), var.subscript.unwrap());
         }
-        Statement::Declaration(expr) => {
-            if let Expression::Identifier(SSAVar { name, subscript }) = expr {
-                var_map.insert(name.to_string(), subscript.unwrap());
-            }
+        Statement::Declaration(SSAVar { name, subscript }) => {
+            var_map.insert(name.to_string(), subscript.unwrap());
         }
         Statement::Compound(stmts) => {
             for stmt in stmts {
@@ -411,7 +412,7 @@ fn find_leaving_defs(parameters: &[SSAVar], body: &[Block]) -> Vec<LeavingMap> {
         let def_kill = &mut def_kills[i];
         for stmt in &body[i].statements {
             if let Statement::Phi(SSAVar { name, subscript }, ..)
-            | Statement::Declaration(Expression::Identifier(SSAVar { name, subscript })) = stmt
+            | Statement::Declaration(SSAVar { name, subscript }) = stmt
             {
                 match de_def.get(name) {
                     Some(_) => de_def.remove(name),
@@ -482,9 +483,7 @@ mod tests {
             parameters: vec![],
             body: vec![
                 Block {
-                    statements: vec![Statement::Declaration(Expression::Identifier(SSAVar::new(
-                        "a",
-                    )))],
+                    statements: vec![Statement::Declaration(SSAVar::new("a"))],
                     predecessors: vec![].into_iter().collect(),
                     successors: vec![1].into_iter().collect(),
                 },
@@ -723,14 +722,14 @@ mod tests {
             body: vec![
                 Block {
                     statements: vec![
-                        Statement::Declaration(Expression::Identifier(SSAVar {
+                        Statement::Declaration(SSAVar {
                             name: "a".to_string(),
                             subscript: Some(1),
-                        })),
-                        Statement::Declaration(Expression::Identifier(SSAVar {
+                        }),
+                        Statement::Declaration(SSAVar {
                             name: "b".to_string(),
                             subscript: Some(0),
-                        })),
+                        }),
                     ],
                     predecessors: vec![].into_iter().collect(),
                     successors: vec![1].into_iter().collect(),
@@ -745,10 +744,10 @@ mod tests {
                     successors: vec![2, 3].into_iter().collect(),
                 },
                 Block {
-                    statements: vec![Statement::Declaration(Expression::Identifier(SSAVar {
+                    statements: vec![Statement::Declaration(SSAVar {
                         name: "a".to_string(),
                         subscript: Some(2),
-                    }))],
+                    })],
                     predecessors: vec![1].into_iter().collect(),
                     successors: vec![3].into_iter().collect(),
                 },
@@ -787,10 +786,10 @@ mod tests {
             }],
             body: vec![
                 Block {
-                    statements: vec![Statement::Declaration(Expression::Identifier(SSAVar {
+                    statements: vec![Statement::Declaration(SSAVar {
                         name: "b".to_string(),
                         subscript: Some(0),
-                    }))],
+                    })],
                     predecessors: vec![].into_iter().collect(),
                     successors: vec![1].into_iter().collect(),
                 },
@@ -804,10 +803,10 @@ mod tests {
                     successors: vec![2, 3].into_iter().collect(),
                 },
                 Block {
-                    statements: vec![Statement::Declaration(Expression::Identifier(SSAVar {
+                    statements: vec![Statement::Declaration(SSAVar {
                         name: "b".to_string(),
                         subscript: Some(1),
-                    }))],
+                    })],
                     predecessors: vec![1].into_iter().collect(),
                     successors: vec![3].into_iter().collect(),
                 },
@@ -898,10 +897,10 @@ mod tests {
         let body = _destruct(&ssa.parameters, ssa.body);
         let expected = vec![
             Block {
-                statements: vec![Statement::Declaration(Expression::Identifier(SSAVar {
+                statements: vec![Statement::Declaration(SSAVar {
                     name: "b".to_string(),
                     subscript: Some(0),
-                }))],
+                })],
                 predecessors: vec![].into_iter().collect(),
                 successors: vec![1].into_iter().collect(),
             },
@@ -940,10 +939,10 @@ mod tests {
             },
             Block {
                 statements: vec![
-                    Statement::Declaration(Expression::Identifier(SSAVar {
+                    Statement::Declaration(SSAVar {
                         name: "b".to_string(),
                         subscript: Some(1),
-                    })),
+                    }),
                     Statement::Expression(Expression::Infix {
                         left: Box::new(Expression::Identifier(SSAVar {
                             name: "b".to_string(),
