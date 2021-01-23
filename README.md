@@ -11,6 +11,7 @@ Compounds statments inside functions will not produce new scopes, so we can cons
 parser is not thread safe
 
 https://software.intel.com/content/www/us/en/develop/articles/introduction-to-x64-assembly.html
+https://docs.microsoft.com/en-us/cpp/build/x64-software-conventions?view=msvc-160
 
 cfg truncate early return
 
@@ -41,6 +42,15 @@ body
     jump TagS
     TagE
 
+## Calling Convention
+
+- Return value (if any) is in `rax`.
+- Arguments are stored in `rcx`, `rdx`, `r8`, `r9`, and stack, from left to right. "shadow space" is reserved.
+- `rsp` is the stack pointer (from 2^64-1 to 0). `rax`, `rcx`, `rdx`, `r8:r11` are volatile registers (caller-saved). `rbx`, `rsi`, `rdi`, `r12:r15` are callee-saved. Specially, we will use `rbp` to hold the base stack pointer (callee-saved).
+- It is the caller's responsibility to clean the stack.
+
+- caller/callee saved regs
+- clean the stack
 
 ``` EBNF
 <non-digit> ::= "A" | "B" | "C" | "D" | "E" | "F" | "G"

@@ -1,6 +1,7 @@
 mod asm;
 mod ir;
 mod parser;
+mod reg_alloc;
 mod ssa;
 mod x64;
 
@@ -11,6 +12,7 @@ pub fn compile(source: &str) -> Vec<u8> {
     let ssa = ssa::construct(ast);
     let cfg = ssa::destruct(ssa);
     let asm = X64Builder::new().build(cfg);
+    let asm = reg_alloc::alloc(asm);
     println!("{:#?}", asm);
     Vec::new()
 }

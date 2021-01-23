@@ -1,5 +1,5 @@
 use crate::ir::{Expression, SSAFunction, SSAProgram, SSAVar, Statement, CFG};
-use crate::x64::{Register, RegisterBuilder, X64Function, X64Program, X64};
+use crate::x64::{Register, VRegisterAllocator, X64Function, X64Program, X64};
 use std::collections::HashMap;
 
 enum Tag {
@@ -10,7 +10,7 @@ enum Tag {
 }
 
 pub struct X64Builder {
-    reg_builder: RegisterBuilder,
+    allocator: VRegisterAllocator,
     tags: HashMap<usize, Vec<Tag>>,
     successors: Vec<usize>,
 }
@@ -18,7 +18,7 @@ pub struct X64Builder {
 impl X64Builder {
     pub fn new() -> Self {
         X64Builder {
-            reg_builder: RegisterBuilder::new(),
+            allocator: VRegisterAllocator::new(),
             tags: HashMap::new(),
             successors: Vec::new(),
         }
@@ -41,11 +41,11 @@ impl X64Builder {
     }
 
     fn build_body(&mut self, parameters: Vec<SSAVar>, body: CFG) -> Vec<X64> {
-        self.reg_builder.clear();
+        self.allocator.clear();
         self.tags.clear();
         let mut asms = Vec::new();
         for var in parameters {
-            self.reg_builder.from_var(var);
+            self.allocator.from_var(var);
         }
         for (index, block) in body.into_iter().enumerate() {
             self.successors = block.successors.into_iter().collect();
@@ -98,7 +98,7 @@ impl X64Builder {
             Statement::Nop => Vec::new(),
             Statement::Phi(_, _) => Vec::new(),
             Statement::Declaration(var) => {
-                self.reg_builder.from_var(var);
+                self.allocator.from_var(var);
                 Vec::new()
             }
             Statement::Compound(stmts) => {
@@ -114,7 +114,7 @@ impl X64Builder {
                 if self.successors.len() == 1 {
                     return asms;
                 }
-                let mut tag = format!("R{}", reg);
+                let mut tag = format!("{}", reg);
                 if alternative.is_none() {
                     let body = self.successors[1] - 1;
                     let if_no_alt = Tag::IfNoAlt(tag.clone());
@@ -135,7 +135,7 @@ impl X64Builder {
             }
             Statement::While { condition, .. } => {
                 let (mut asms, reg) = self.build_expr(condition);
-                let mut tag = format!("R{}", reg);
+                let mut tag = format!("{}", reg);
                 let body = self.successors[0];
                 let while_body = Tag::WhileBody(tag.clone());
                 self.tags.entry(body).or_default().push(while_body);
@@ -157,9 +157,9 @@ impl X64Builder {
 
     fn build_expr(&mut self, expr: Expression) -> (Vec<X64>, Register) {
         match expr {
-            Expression::Identifier(var) => (Vec::new(), self.reg_builder.from_var(var)),
+            Expression::Identifier(var) => (Vec::new(), self.allocator.from_var(var)),
             Expression::Number(num) => {
-                let reg = self.reg_builder.create_temp();
+                let reg = self.allocator.create_temp();
                 (vec![X64::MovNum(reg, num)], reg)
             }
             Expression::Call {
@@ -177,7 +177,7 @@ impl X64Builder {
                         regs.push(r);
                     }
                     asms.push(X64::Call(name, regs));
-                    (asms, 0)
+                    (asms, Register::Virtual(0))
                 } else {
                     unreachable!();
                 }
@@ -195,8 +195,8 @@ impl X64Builder {
                 }
                 "!" => {
                     let (mut asm, reg) = self.build_expr(*expression);
-                    let r = self.reg_builder.create_temp();
-                    let tag = format!("R{}", r);
+                    let r = self.allocator.create_temp();
+                    let tag = format!("{}", r);
                     asm.extend(vec![
                         X64::MovNum(r, 1),
                         X64::CmpNum(reg, 0),
@@ -218,7 +218,7 @@ impl X64Builder {
                 let (asms, reg) = if operator == "=" {
                     (vec![X64::MovReg(left_reg, right_reg)], left_reg)
                 } else {
-                    let reg = self.reg_builder.create_temp();
+                    let reg = self.allocator.create_temp();
                     match operator {
                         "*" => (
                             vec![X64::MovReg(reg, left_reg), X64::Imul(reg, right_reg)],
@@ -245,7 +245,7 @@ impl X64Builder {
                             reg,
                         ),
                         op => {
-                            let tag = format!("R{}", reg);
+                            let tag = format!("{}", reg);
                             let asm = match op {
                                 "<" => X64::Jl(tag.clone()),
                                 ">" => X64::Jg(tag.clone()),
@@ -300,7 +300,7 @@ mod tests {
         let asm = X64Builder::new().build(cfg);
         let expected = vec![X64Function {
             name: String::from("main"),
-            body: vec![X64::MovNum(1, 1)],
+            body: vec![X64::MovNum(Register::Virtual(1), 1)],
         }];
         assert_eq!(asm, expected);
     }
@@ -326,7 +326,7 @@ mod tests {
             },
             X64Function {
                 name: String::from("main"),
-                body: vec![X64::Call(String::from("f"), vec![0])],
+                body: vec![X64::Call(String::from("f"), vec![Register::Virtual(0)])],
             },
         ];
         assert_eq!(asm, expected);
@@ -350,13 +350,13 @@ mod tests {
         let expected = vec![X64Function {
             name: String::from("main"),
             body: vec![
-                X64::Neg(1),
-                X64::MovNum(2, 0),
-                X64::MovNum(3, 1),
-                X64::CmpNum(2, 0),
-                X64::Je(String::from("R3")),
-                X64::MovNum(3, 0),
-                X64::Tag(String::from("R3")),
+                X64::Neg(Register::Virtual(1)),
+                X64::MovNum(Register::Virtual(2), 0),
+                X64::MovNum(Register::Virtual(3), 1),
+                X64::CmpNum(Register::Virtual(2), 0),
+                X64::Je(String::from("VR3")),
+                X64::MovNum(Register::Virtual(3), 0),
+                X64::Tag(String::from("VR3")),
             ],
         }];
         assert_eq!(asm, expected);
@@ -378,57 +378,57 @@ mod tests {
         let expected = vec![X64Function {
             name: String::from("main"),
             body: vec![
-                X64::MovNum(2, 0),
-                X64::MovNum(3, 1),
-                X64::MovReg(4, 2),
-                X64::Imul(4, 3),
-                X64::MovNum(5, 2),
-                X64::MovReg(6, 4),
-                X64::Idiv(6, 5),
-                X64::MovNum(7, 3),
-                X64::MovReg(8, 6),
-                X64::Add(8, 7),
-                X64::MovNum(9, 4),
-                X64::MovReg(10, 8),
-                X64::Sub(10, 9),
-                X64::MovNum(11, 5),
-                X64::MovReg(12, 10),
-                X64::And(12, 11),
-                X64::MovNum(13, 6),
-                X64::MovReg(14, 12),
-                X64::Or(14, 13),
-                X64::MovReg(0, 14),
-                X64::MovNum(15, 1),
-                X64::CmpReg(0, 0),
-                X64::Jl(String::from("R15")),
-                X64::MovNum(15, 0),
-                X64::Tag(String::from("R15")),
-                X64::MovNum(16, 1),
-                X64::CmpReg(15, 0),
-                X64::Jg(String::from("R16")),
-                X64::MovNum(16, 0),
-                X64::Tag(String::from("R16")),
-                X64::MovNum(17, 1),
-                X64::CmpReg(16, 0),
-                X64::Jle(String::from("R17")),
-                X64::MovNum(17, 0),
-                X64::Tag(String::from("R17")),
-                X64::MovNum(18, 1),
-                X64::CmpReg(17, 0),
-                X64::Jge(String::from("R18")),
-                X64::MovNum(18, 0),
-                X64::Tag(String::from("R18")),
-                X64::MovNum(19, 1),
-                X64::CmpReg(18, 0),
-                X64::Je(String::from("R19")),
-                X64::MovNum(19, 0),
-                X64::Tag(String::from("R19")),
-                X64::MovNum(20, 1),
-                X64::CmpReg(19, 0),
-                X64::Jne(String::from("R20")),
-                X64::MovNum(20, 0),
-                X64::Tag(String::from("R20")),
-                X64::MovReg(1, 20),
+                X64::MovNum(Register::Virtual(2), 0),
+                X64::MovNum(Register::Virtual(3), 1),
+                X64::MovReg(Register::Virtual(4), Register::Virtual(2)),
+                X64::Imul(Register::Virtual(4), Register::Virtual(3)),
+                X64::MovNum(Register::Virtual(5), 2),
+                X64::MovReg(Register::Virtual(6), Register::Virtual(4)),
+                X64::Idiv(Register::Virtual(6), Register::Virtual(5)),
+                X64::MovNum(Register::Virtual(7), 3),
+                X64::MovReg(Register::Virtual(8), Register::Virtual(6)),
+                X64::Add(Register::Virtual(8), Register::Virtual(7)),
+                X64::MovNum(Register::Virtual(9), 4),
+                X64::MovReg(Register::Virtual(10), Register::Virtual(8)),
+                X64::Sub(Register::Virtual(10), Register::Virtual(9)),
+                X64::MovNum(Register::Virtual(11), 5),
+                X64::MovReg(Register::Virtual(12), Register::Virtual(10)),
+                X64::And(Register::Virtual(12), Register::Virtual(11)),
+                X64::MovNum(Register::Virtual(13), 6),
+                X64::MovReg(Register::Virtual(14), Register::Virtual(12)),
+                X64::Or(Register::Virtual(14), Register::Virtual(13)),
+                X64::MovReg(Register::Virtual(0), Register::Virtual(14)),
+                X64::MovNum(Register::Virtual(15), 1),
+                X64::CmpReg(Register::Virtual(0), Register::Virtual(0)),
+                X64::Jl(String::from("VR15")),
+                X64::MovNum(Register::Virtual(15), 0),
+                X64::Tag(String::from("VR15")),
+                X64::MovNum(Register::Virtual(16), 1),
+                X64::CmpReg(Register::Virtual(15), Register::Virtual(0)),
+                X64::Jg(String::from("VR16")),
+                X64::MovNum(Register::Virtual(16), 0),
+                X64::Tag(String::from("VR16")),
+                X64::MovNum(Register::Virtual(17), 1),
+                X64::CmpReg(Register::Virtual(16), Register::Virtual(0)),
+                X64::Jle(String::from("VR17")),
+                X64::MovNum(Register::Virtual(17), 0),
+                X64::Tag(String::from("VR17")),
+                X64::MovNum(Register::Virtual(18), 1),
+                X64::CmpReg(Register::Virtual(17), Register::Virtual(0)),
+                X64::Jge(String::from("VR18")),
+                X64::MovNum(Register::Virtual(18), 0),
+                X64::Tag(String::from("VR18")),
+                X64::MovNum(Register::Virtual(19), 1),
+                X64::CmpReg(Register::Virtual(18), Register::Virtual(0)),
+                X64::Je(String::from("VR19")),
+                X64::MovNum(Register::Virtual(19), 0),
+                X64::Tag(String::from("VR19")),
+                X64::MovNum(Register::Virtual(20), 1),
+                X64::CmpReg(Register::Virtual(19), Register::Virtual(0)),
+                X64::Jne(String::from("VR20")),
+                X64::MovNum(Register::Virtual(20), 0),
+                X64::Tag(String::from("VR20")),
+                X64::MovReg(Register::Virtual(1), Register::Virtual(20)),
             ],
         }];
         assert_eq!(asm, expected);
@@ -458,21 +458,21 @@ mod tests {
         let expected = vec![X64Function {
             name: String::from("main"),
             body: vec![
-                X64::MovNum(0, 0),
-                X64::CmpNum(0, 0),
-                X64::Je(String::from("R0Start")),
-                X64::MovNum(1, 1),
-                X64::Jump(String::from("R0End")),
-                X64::Tag(String::from("R0Start")),
-                X64::MovNum(2, 2),
-                X64::Tag(String::from("R0End")),
-                X64::MovNum(3, 3),
-                X64::CmpNum(3, 0),
-                X64::Je(String::from("R3End")),
-                X64::MovNum(4, 4),
-                X64::Tag(String::from("R3End")),
-                X64::MovNum(5, 5),
-                X64::MovNum(6, 6),
+                X64::MovNum(Register::Virtual(0), 0),
+                X64::CmpNum(Register::Virtual(0), 0),
+                X64::Je(String::from("VR0Start")),
+                X64::MovNum(Register::Virtual(1), 1),
+                X64::Jump(String::from("VR0End")),
+                X64::Tag(String::from("VR0Start")),
+                X64::MovNum(Register::Virtual(2), 2),
+                X64::Tag(String::from("VR0End")),
+                X64::MovNum(Register::Virtual(3), 3),
+                X64::CmpNum(Register::Virtual(3), 0),
+                X64::Je(String::from("VR3End")),
+                X64::MovNum(Register::Virtual(4), 4),
+                X64::Tag(String::from("VR3End")),
+                X64::MovNum(Register::Virtual(5), 5),
+                X64::MovNum(Register::Virtual(6), 6),
             ],
         }];
         assert_eq!(asm, expected);
@@ -496,19 +496,19 @@ mod tests {
         let expected = vec![X64Function {
             name: String::from("main"),
             body: vec![
-                X64::Tag(String::from("R0Start")),
-                X64::MovNum(0, 0),
-                X64::CmpNum(0, 0),
-                X64::Je(String::from("R0End")),
-                X64::MovNum(1, 1),
-                X64::Jump(String::from("R0Start")),
-                X64::Tag(String::from("R0End")),
-                X64::Tag(String::from("R2Start")),
-                X64::MovNum(2, 2),
-                X64::CmpNum(2, 0),
-                X64::Je(String::from("R2End")),
-                X64::Jump(String::from("R2Start")),
-                X64::Tag(String::from("R2End")),
+                X64::Tag(String::from("VR0Start")),
+                X64::MovNum(Register::Virtual(0), 0),
+                X64::CmpNum(Register::Virtual(0), 0),
+                X64::Je(String::from("VR0End")),
+                X64::MovNum(Register::Virtual(1), 1),
+                X64::Jump(String::from("VR0Start")),
+                X64::Tag(String::from("VR0End")),
+                X64::Tag(String::from("VR2Start")),
+                X64::MovNum(Register::Virtual(2), 2),
+                X64::CmpNum(Register::Virtual(2), 0),
+                X64::Je(String::from("VR2End")),
+                X64::Jump(String::from("VR2Start")),
+                X64::Tag(String::from("VR2End")),
             ],
         }];
         assert_eq!(asm, expected);
@@ -532,12 +532,12 @@ mod tests {
         let expected = vec![X64Function {
             name: String::from("main"),
             body: vec![
-                X64::MovNum(0, 0),
-                X64::CmpNum(0, 0),
-                X64::Je(String::from("R0End")),
-                X64::MovNum(1, 1),
-                X64::Ret(Some(1)),
-                X64::Tag(String::from("R0End")),
+                X64::MovNum(Register::Virtual(0), 0),
+                X64::CmpNum(Register::Virtual(0), 0),
+                X64::Je(String::from("VR0End")),
+                X64::MovNum(Register::Virtual(1), 1),
+                X64::Ret(Some(Register::Virtual(1))),
+                X64::Tag(String::from("VR0End")),
                 X64::Ret(None),
             ],
         }];
