@@ -94,7 +94,6 @@ fn alloc_body(body: Vec<X64>) -> Vec<X64> {
             X64::Ret(Some(vreg)) => {
                 let mut asms = allocator.ret(vreg);
                 asms.extend(allocator.epilog());
-                asms.push(X64::Ret(None));
                 asms
             }
             _ => Vec::new(),
@@ -151,6 +150,7 @@ mod tests {
                     X64::Pop(X64R::RDI),
                     X64::Pop(X64R::RSI),
                     X64::Pop(X64R::RBX),
+                    X64::Ret(None),
                 ],
             },
             X64Function {
@@ -207,6 +207,7 @@ mod tests {
                     X64::Pop(X64R::RDI),
                     X64::Pop(X64R::RSI),
                     X64::Pop(X64R::RBX),
+                    X64::Ret(None),
                 ],
             },
         ];
@@ -259,7 +260,7 @@ mod tests {
                     X64::MovReg(X64R::RBX, X64R::RDX),
                     X64::Add(X64R::RBX, X64R::RCX),
                     X64::MovReg(X64R::RAX, X64R::RBX),
-                    X64::SubNum(X64R::RBP, 4),
+                    X64::SubNum(X64R::RSP, 4),
                     X64::MovToStack(0, *reg),
                     X64::MovNum(*reg, 1),
                     X64::Pop(X64R::R15),
@@ -269,6 +270,7 @@ mod tests {
                     X64::Pop(X64R::RDI),
                     X64::Pop(X64R::RSI),
                     X64::Pop(X64R::RBX),
+                    X64::Ret(None),
                 ],
             }];
             assert_eq!(asm, expected);

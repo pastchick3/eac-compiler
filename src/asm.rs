@@ -1,5 +1,5 @@
 use crate::ir::{Expression, SSAFunction, SSAProgram, SSAVar, Statement, CFG};
-use crate::x64::{Register, VRegisterAllocator, X64Function, X64Program, X64};
+use crate::x64::{Register, VRegisterAllocator, X64Function, X64Program, X64Register, X64};
 use std::collections::HashMap;
 
 enum Tag {
@@ -177,7 +177,7 @@ impl X64Builder {
                         regs.push(r);
                     }
                     asms.push(X64::Call(name, regs));
-                    (asms, Register::Virtual(0))
+                    (asms, Register::X64(X64Register::RAX))
                 } else {
                     unreachable!();
                 }

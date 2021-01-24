@@ -154,6 +154,7 @@ impl X64RegisterAllocator {
             X64::Pop(Self::RDI),
             X64::Pop(Self::RSI),
             X64::Pop(Self::RBX),
+            X64::Ret(None),
         ]
     }
 
@@ -251,7 +252,7 @@ impl X64RegisterAllocator {
             }
         }
         self.stack.push(false);
-        let asm = X64::SubNum(Self::RBP, Self::INT_SIZE);
+        let asm = X64::SubNum(Self::RSP, Self::INT_SIZE);
         let offset = (self.stack.len() - 1) * Self::INT_SIZE;
         (vec![asm], offset)
     }
@@ -287,6 +288,39 @@ pub enum X64 {
     Pop(Register),
 }
 
+impl Display for X64 {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        match self {
+            X64::MovNum(reg, num) => write!(f, "mov {}, {}", reg, num),
+            X64::MovReg(left, right) => write!(f, "mov {}, {}", left, right),
+            X64::MovToStack(offset, reg) => write!(f, "mov [RBP-{}], {}", offset, reg),
+            X64::MovFromStack(reg, offset) => write!(f, "mov {}, [RBP-{}]", reg, offset),
+            X64::Call(name, _) => write!(f, "call {}", name),
+            X64::Neg(reg) => write!(f, "neg {}", reg),
+            X64::CmpNum(reg, num) => write!(f, "cmp {}, {}", reg, num),
+            X64::CmpReg(left, right) => write!(f, "cmp {}, {}", left, right),
+            X64::Jl(tag) => write!(f, "jl {}", tag),
+            X64::Jg(tag) => write!(f, "jg {}", tag),
+            X64::Jle(tag) => write!(f, "jle {}", tag),
+            X64::Jge(tag) => write!(f, "jge {}", tag),
+            X64::Je(tag) => write!(f, "je {}", tag),
+            X64::Jne(tag) => write!(f, "jne {}", tag),
+            X64::Jump(tag) => write!(f, "jump {}", tag),
+            X64::Tag(tag) => write!(f, "{}:", tag),
+            X64::Imul(left, right) => write!(f, "imul {}, {}", left, right),
+            X64::Idiv(left, right) => write!(f, "idiv {}, {}", left, right),
+            X64::Add(left, right) => write!(f, "add {}, {}", left, right),
+            X64::Sub(left, right) => write!(f, "sub {}, {}", left, right),
+            X64::SubNum(reg, offset) => write!(f, "sub {}, {}", reg, offset),
+            X64::And(left, right) => write!(f, "and {}, {}", left, right),
+            X64::Or(left, right) => write!(f, "or {}, {}", left, right),
+            X64::Ret(_) => write!(f, "ret"),
+            X64::Push(reg) => write!(f, "push {}", reg),
+            X64::Pop(reg) => write!(f, "pop {}", reg),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub struct X64Function {
     pub name: String,
@@ -294,9 +328,3 @@ pub struct X64Function {
 }
 
 pub type X64Program = Vec<X64Function>;
-
-impl Display for X64Function {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        write!(f, "VR")
-    }
-}
