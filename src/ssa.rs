@@ -249,7 +249,6 @@ fn find_reaching_defs(parameters: &mut Vec<SSAVar>, body: &mut CFG) -> Vec<Reach
             }
         }
     }
-    println!("in while");
     reaches
 }
 

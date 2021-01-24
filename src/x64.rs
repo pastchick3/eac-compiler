@@ -52,6 +52,7 @@ impl VRegisterAllocator {
 
     pub fn clear(&mut self) {
         self.count = 0;
+        self.var_map.clear();
     }
 }
 
@@ -75,11 +76,13 @@ pub enum X64Register {
     R15,
 }
 
+#[derive(Debug)]
 enum VRegStatus {
     Reg(Register),
     Stack(usize),
 }
 
+#[derive(Debug)]
 pub struct X64RegisterAllocator {
     vreg_map: HashMap<Register, VRegStatus>,
     last: Register,
@@ -88,23 +91,23 @@ pub struct X64RegisterAllocator {
 }
 
 impl X64RegisterAllocator {
-    const INT_SIZE: usize = 4;
+    pub const INT_SIZE: usize = 4;
     pub const RAX: Register = Register::X64(X64Register::RAX);
-    const RBX: Register = Register::X64(X64Register::RBX);
-    const RCX: Register = Register::X64(X64Register::RCX);
-    const RDX: Register = Register::X64(X64Register::RDX);
-    const RBP: Register = Register::X64(X64Register::RBP);
-    const RSI: Register = Register::X64(X64Register::RSI);
-    const RDI: Register = Register::X64(X64Register::RDI);
-    const RSP: Register = Register::X64(X64Register::RSP);
-    const R8: Register = Register::X64(X64Register::R8);
-    const R9: Register = Register::X64(X64Register::R9);
-    const R10: Register = Register::X64(X64Register::R10);
-    const R11: Register = Register::X64(X64Register::R11);
-    const R12: Register = Register::X64(X64Register::R12);
-    const R13: Register = Register::X64(X64Register::R13);
-    const R14: Register = Register::X64(X64Register::R14);
-    const R15: Register = Register::X64(X64Register::R15);
+    pub const RBX: Register = Register::X64(X64Register::RBX);
+    pub const RCX: Register = Register::X64(X64Register::RCX);
+    pub const RDX: Register = Register::X64(X64Register::RDX);
+    pub const RBP: Register = Register::X64(X64Register::RBP);
+    pub const RSI: Register = Register::X64(X64Register::RSI);
+    pub const RDI: Register = Register::X64(X64Register::RDI);
+    pub const RSP: Register = Register::X64(X64Register::RSP);
+    pub const R8: Register = Register::X64(X64Register::R8);
+    pub const R9: Register = Register::X64(X64Register::R9);
+    pub const R10: Register = Register::X64(X64Register::R10);
+    pub const R11: Register = Register::X64(X64Register::R11);
+    pub const R12: Register = Register::X64(X64Register::R12);
+    pub const R13: Register = Register::X64(X64Register::R13);
+    pub const R14: Register = Register::X64(X64Register::R14);
+    pub const R15: Register = Register::X64(X64Register::R15);
 
     pub fn new() -> Self {
         X64RegisterAllocator {
@@ -144,30 +147,14 @@ impl X64RegisterAllocator {
 
     pub fn epilog(&self) -> Vec<X64> {
         vec![
-            X64::Push(Self::R15),
-            X64::Push(Self::R14),
-            X64::Push(Self::R13),
-            X64::Push(Self::R12),
-            X64::Push(Self::RDI),
-            X64::Push(Self::RSI),
-            X64::Push(Self::RBX),
+            X64::Pop(Self::R15),
+            X64::Pop(Self::R14),
+            X64::Pop(Self::R13),
+            X64::Pop(Self::R12),
+            X64::Pop(Self::RDI),
+            X64::Pop(Self::RSI),
+            X64::Pop(Self::RBX),
         ]
-    }
-
-    pub fn alloc(&mut self, vreg: Register) -> (Vec<X64>, Register) {
-        match self.vreg_map.remove(&vreg) {
-            Some(VRegStatus::Reg(reg)) => (Vec::new(), reg),
-            Some(VRegStatus::Stack(offset)) => {
-                let (mut asms, reg) = self.ensure_reg();
-                asms.push(X64::MovFromStack(reg, offset));
-                (asms, reg)
-            }
-            None => {
-                let (asms, reg) = self.ensure_reg();
-                self.vreg_map.insert(vreg, VRegStatus::Reg(reg));
-                (asms, reg)
-            }
-        }
     }
 
     pub fn call_prolog(&mut self, args: Vec<Register>) -> Vec<X64> {
@@ -210,6 +197,32 @@ impl X64RegisterAllocator {
         ]
     }
 
+    pub fn ret(&mut self, vreg: Register) -> Vec<X64> {
+        let (mut asms, reg) = self.alloc(vreg);
+        asms.push(X64::MovReg(Self::RAX, reg));
+        asms
+    }
+
+    pub fn alloc(&mut self, vreg: Register) -> (Vec<X64>, Register) {
+        match self.vreg_map.remove(&vreg) {
+            Some(VRegStatus::Reg(reg)) => {
+                self.vreg_map.insert(vreg, VRegStatus::Reg(reg));
+                (Vec::new(), reg)
+            }
+            Some(VRegStatus::Stack(offset)) => {
+                let (mut asms, reg) = self.ensure_reg();
+                asms.push(X64::MovFromStack(reg, offset));
+                self.vreg_map.insert(vreg, VRegStatus::Reg(reg));
+                (asms, reg)
+            }
+            None => {
+                let (asms, reg) = self.ensure_reg();
+                self.vreg_map.insert(vreg, VRegStatus::Reg(reg));
+                (asms, reg)
+            }
+        }
+    }
+
     fn ensure_reg(&mut self) -> (Vec<X64>, Register) {
         match self.x64regs.pop() {
             Some(reg) => (Vec::new(), reg),
@@ -241,16 +254,6 @@ impl X64RegisterAllocator {
         let asm = X64::SubNum(Self::RBP, Self::INT_SIZE);
         let offset = (self.stack.len() - 1) * Self::INT_SIZE;
         (vec![asm], offset)
-    }
-
-    pub fn free(&mut self, vreg: Register) {
-        match self.vreg_map.remove(&vreg) {
-            Some(VRegStatus::Reg(reg)) => self.x64regs.push(reg),
-            Some(VRegStatus::Stack(offset)) => {
-                self.stack[offset / Self::INT_SIZE] = true;
-            }
-            None => {}
-        }
     }
 }
 
@@ -291,3 +294,9 @@ pub struct X64Function {
 }
 
 pub type X64Program = Vec<X64Function>;
+
+impl Display for X64Function {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        write!(f, "VR")
+    }
+}
