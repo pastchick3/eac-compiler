@@ -92,6 +92,7 @@ pub struct X64RegisterAllocator {
 
 impl X64RegisterAllocator {
     pub const INT_SIZE: usize = 4;
+    pub const FRAME_SIZE: usize = Self::INT_SIZE * 128;
     pub const RAX: Register = Register::X64(X64Register::RAX);
     pub const RBX: Register = Register::X64(X64Register::RBX);
     pub const RCX: Register = Register::X64(X64Register::RCX);
@@ -109,13 +110,12 @@ impl X64RegisterAllocator {
     pub const R14: Register = Register::X64(X64Register::R14);
     pub const R15: Register = Register::X64(X64Register::R15);
 
-    pub fn new() -> Self {
-        X64RegisterAllocator {
+    pub fn new(params: usize) -> Self {
+        let mut allocator = X64RegisterAllocator {
             vreg_map: HashMap::new(),
             last: Self::RBP,
             stack: Vec::new(),
             x64regs: vec![
-                Self::RAX,
                 Self::RBX,
                 Self::RCX,
                 Self::RDX,
@@ -130,7 +130,33 @@ impl X64RegisterAllocator {
                 Self::R14,
                 Self::R15,
             ],
+        };
+        allocator.stack = vec![false; params];
+        for i in 0..params {
+            let vreg = Register::Virtual(i);
+            match i {
+                0 => {
+                    let rcx= allocator.x64regs.remove(1);
+                    allocator.vreg_map.insert(vreg, VRegStatus::Reg(rcx));
+                }
+                1 => {
+                    let rdx= allocator.x64regs.remove(1);
+                    allocator.vreg_map.insert(vreg, VRegStatus::Reg(rdx));
+                }
+                2 => {
+                    let r8= allocator.x64regs.remove(3);
+                    allocator.vreg_map.insert(vreg, VRegStatus::Reg(r8));
+                }
+                3 => {
+                    let rcx= allocator.x64regs.remove(3);
+                    allocator.vreg_map.insert(vreg, VRegStatus::Reg(rcx));
+                }
+                i => {
+                    allocator.vreg_map.insert(vreg, VRegStatus::Stack(i*Self::INT_SIZE));
+                }
+            }
         }
+        allocator
     }
 
     pub fn prolog(&self) -> Vec<X64> {
@@ -158,17 +184,16 @@ impl X64RegisterAllocator {
         ]
     }
 
-    pub fn call_prolog(&mut self, args: Vec<Register>) -> Vec<X64> {
+    pub fn call_prolog(&mut self, args: Vec<Register>, ret:Register) -> (Vec<X64>, Register) {
         let mut assemblies = vec![
-            X64::Push(Self::RAX),
             X64::Push(Self::RCX),
             X64::Push(Self::RDX),
             X64::Push(Self::R8),
             X64::Push(Self::R9),
             X64::Push(Self::R10),
             X64::Push(Self::R11),
+            X64::SubNum(Self::RSP, Self::FRAME_SIZE),
             X64::MovReg(Self::RBP, Self::RSP),
-            X64::SubNum(Self::RSP, args.len() * Self::INT_SIZE),
         ];
         for (i, arg) in args.into_iter().enumerate() {
             let (asms, reg) = self.alloc(arg);
@@ -182,19 +207,20 @@ impl X64RegisterAllocator {
                 _ => {}
             }
         }
-        assemblies
+        let (asms, ret) = self.alloc(ret);
+        assemblies.extend(asms);
+        (assemblies, ret)
     }
 
     pub fn call_epilog(&self) -> Vec<X64> {
         vec![
-            X64::MovReg(Self::RSP, Self::RBP),
+            X64::AddNum(Self::RSP, Self::FRAME_SIZE),
             X64::Pop(Self::R11),
             X64::Pop(Self::R10),
             X64::Pop(Self::R9),
             X64::Pop(Self::R8),
             X64::Pop(Self::RDX),
             X64::Pop(Self::RCX),
-            X64::Pop(Self::RAX),
         ]
     }
 
@@ -205,6 +231,9 @@ impl X64RegisterAllocator {
     }
 
     pub fn alloc(&mut self, vreg: Register) -> (Vec<X64>, Register) {
+        if let reg @ Register::X64(_) = vreg {
+            return (Vec::new(), reg)
+        }
         match self.vreg_map.remove(&vreg) {
             Some(VRegStatus::Reg(reg)) => {
                 self.vreg_map.insert(vreg, VRegStatus::Reg(reg));
@@ -228,12 +257,12 @@ impl X64RegisterAllocator {
         match self.x64regs.pop() {
             Some(reg) => (Vec::new(), reg),
             None => {
-                let (mut asms, offset) = self.alloc_stack();
+                let offset = self.alloc_stack();
                 for (vreg, status) in self.vreg_map.iter_mut() {
                     if *vreg != self.last {
                         if let VRegStatus::Reg(reg) = *status {
                             self.last = *vreg;
-                            asms.push(X64::MovToStack(offset, reg));
+                            let asms = vec![X64::MovToStack(offset, reg)];
                             *status = VRegStatus::Stack(offset);
                             return (asms, reg);
                         }
@@ -244,17 +273,16 @@ impl X64RegisterAllocator {
         }
     }
 
-    fn alloc_stack(&mut self) -> (Vec<X64>, usize) {
+    fn alloc_stack(&mut self) -> usize {
         for (i, freed) in self.stack.iter_mut().enumerate() {
             if *freed {
                 *freed = false;
-                return (Vec::new(), i * Self::INT_SIZE);
+                return i * Self::INT_SIZE;
             }
         }
         self.stack.push(false);
-        let asm = X64::SubNum(Self::RSP, Self::INT_SIZE);
         let offset = (self.stack.len() - 1) * Self::INT_SIZE;
-        (vec![asm], offset)
+        offset
     }
 }
 
@@ -264,7 +292,7 @@ pub enum X64 {
     MovReg(Register, Register),
     MovToStack(usize, Register),
     MovFromStack(Register, usize),
-    Call(String, Vec<Register>),
+    Call(String, Vec<Register>, Register),
     Neg(Register),
     CmpNum(Register, i32),
     CmpReg(Register, Register),
@@ -274,11 +302,12 @@ pub enum X64 {
     Jge(String),
     Je(String),
     Jne(String),
-    Jump(String),
+    Jmp(String),
     Tag(String),
     Imul(Register, Register),
     Idiv(Register, Register),
     Add(Register, Register),
+    AddNum(Register, usize),
     Sub(Register, Register),
     SubNum(Register, usize),
     And(Register, Register),
@@ -293,9 +322,9 @@ impl Display for X64 {
         match self {
             X64::MovNum(reg, num) => write!(f, "mov {}, {}", reg, num),
             X64::MovReg(left, right) => write!(f, "mov {}, {}", left, right),
-            X64::MovToStack(offset, reg) => write!(f, "mov [RBP-{}], {}", offset, reg),
-            X64::MovFromStack(reg, offset) => write!(f, "mov {}, [RBP-{}]", reg, offset),
-            X64::Call(name, _) => write!(f, "call {}", name),
+            X64::MovToStack(offset, reg) => write!(f, "mov {}[RBP], {}", offset, reg),
+            X64::MovFromStack(reg, offset) => write!(f, "mov {}, {}[RBP]", reg, offset),
+            X64::Call(name, _, _) => write!(f, "call {}", name),
             X64::Neg(reg) => write!(f, "neg {}", reg),
             X64::CmpNum(reg, num) => write!(f, "cmp {}, {}", reg, num),
             X64::CmpReg(left, right) => write!(f, "cmp {}, {}", left, right),
@@ -305,11 +334,12 @@ impl Display for X64 {
             X64::Jge(tag) => write!(f, "jge {}", tag),
             X64::Je(tag) => write!(f, "je {}", tag),
             X64::Jne(tag) => write!(f, "jne {}", tag),
-            X64::Jump(tag) => write!(f, "jump {}", tag),
+            X64::Jmp(tag) => write!(f, "jmp {}", tag),
             X64::Tag(tag) => write!(f, "{}:", tag),
             X64::Imul(left, right) => write!(f, "imul {}, {}", left, right),
             X64::Idiv(left, right) => write!(f, "idiv {}, {}", left, right),
             X64::Add(left, right) => write!(f, "add {}, {}", left, right),
+            X64::AddNum(reg, offset) => write!(f, "add {}, {}", reg, offset),
             X64::Sub(left, right) => write!(f, "sub {}, {}", left, right),
             X64::SubNum(reg, offset) => write!(f, "sub {}, {}", reg, offset),
             X64::And(left, right) => write!(f, "and {}, {}", left, right),
@@ -324,6 +354,7 @@ impl Display for X64 {
 #[derive(Debug, PartialEq)]
 pub struct X64Function {
     pub name: String,
+    pub params: usize,
     pub body: Vec<X64>,
 }
 

@@ -46,7 +46,7 @@ body
 
 - Return value (if any) is in `rax`.
 - Arguments are stored in `rcx`, `rdx`, `r8`, `r9`, and stack, from left to right. "shadow space" is reserved.
-- `rsp` is the stack pointer (from 2^64-1 to 0). `rax`, `rcx`, `rdx`, `r8:r11` are volatile registers (caller-saved). `rbx`, `rsi`, `rdi`, `r12:r15` are callee-saved. Specially, we will use `rbp` to hold the base stack pointer (callee-saved).
+- `rsp` is the stack pointer (from 2^64-1 to 0). `rax` is the return register. `rcx`, `rdx`, `r8:r11` are volatile registers (caller-saved). `rbx`, `rsi`, `rdi`, `r12:r15` are callee-saved. Specially, we will use `rbp` to hold the base stack pointer (callee-saved).
 - It is the caller's responsibility to clean the stack.
 
 - caller/callee saved regs

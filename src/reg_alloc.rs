@@ -2,15 +2,16 @@ use crate::x64::{X64Function, X64Program, X64RegisterAllocator, X64};
 
 pub fn alloc(asm: X64Program) -> X64Program {
     asm.into_iter()
-        .map(|X64Function { name, body }| X64Function {
+        .map(|X64Function { name, params, body }| X64Function {
             name,
-            body: alloc_body(body),
+            params,
+            body: alloc_body(params, body),
         })
         .collect()
 }
 
-fn alloc_body(body: Vec<X64>) -> Vec<X64> {
-    let mut allocator = X64RegisterAllocator::new();
+fn alloc_body(params: usize, body: Vec<X64>) -> Vec<X64> {
+    let mut allocator = X64RegisterAllocator::new(params);
     let mut asms = allocator.prolog();
     for asm in body {
         asms.extend(match asm {
@@ -19,17 +20,18 @@ fn alloc_body(body: Vec<X64>) -> Vec<X64> {
                 asms.push(X64::MovNum(reg, num));
                 asms
             }
-            X64::MovReg(vleft, right) => {
-                let (mut left_asms, left) = allocator.alloc(vleft);
+            X64::MovReg(left, right) => {
+                let (mut left_asms, left) = allocator.alloc(left);
                 let (right_asms, right) = allocator.alloc(right);
                 left_asms.extend(right_asms);
                 left_asms.push(X64::MovReg(left, right));
                 left_asms
             }
-            X64::Call(func, args) => {
-                let mut asms = allocator.call_prolog(args);
-                asms.push(X64::Call(func, Vec::new()));
+            X64::Call(func, args, ret) => {
+                let (mut asms, ret) = allocator.call_prolog(args, ret);
+                asms.push(X64::Call(func, Vec::new(), ret));
                 asms.extend(allocator.call_epilog());
+                asms.push(X64::MovReg(ret, X64RegisterAllocator::RAX));
                 asms
             }
             X64::Neg(vreg) => {
@@ -96,7 +98,7 @@ fn alloc_body(body: Vec<X64>) -> Vec<X64> {
                 asms.extend(allocator.epilog());
                 asms
             }
-            _ => Vec::new(),
+            asm => vec![asm],
         });
     }
     asms.extend(allocator.epilog());
@@ -115,7 +117,9 @@ mod tests {
     fn calling_convention() {
         let ast = parser::parse(
             "
-            void f(int a, int b, int c, int d, int e) {}
+            int f(int a, int b, int c, int d, int e) {
+                return a;
+            }
 
             int main() {
                 int a;
@@ -123,8 +127,7 @@ mod tests {
                 int c;
                 int d;
                 int e;
-                f(a, b, c, d, e);
-                return 0;
+                return f(a, b, c, d, e) + 1;
             }
         ",
         );
@@ -135,6 +138,7 @@ mod tests {
         let expected = vec![
             X64Function {
                 name: String::from("f"),
+                params: 5,
                 body: vec![
                     X64::Push(X64R::RBX),
                     X64::Push(X64R::RSI),
@@ -143,6 +147,15 @@ mod tests {
                     X64::Push(X64R::R13),
                     X64::Push(X64R::R14),
                     X64::Push(X64R::R15),
+                    X64::MovReg(X64R::RAX, X64R::RCX),
+                    X64::Pop(X64R::R15),
+                    X64::Pop(X64R::R14),
+                    X64::Pop(X64R::R13),
+                    X64::Pop(X64R::R12),
+                    X64::Pop(X64R::RDI),
+                    X64::Pop(X64R::RSI),
+                    X64::Pop(X64R::RBX),
+                    X64::Ret(None),
                     X64::Pop(X64R::R15),
                     X64::Pop(X64R::R14),
                     X64::Pop(X64R::R13),
@@ -155,6 +168,7 @@ mod tests {
             },
             X64Function {
                 name: String::from("main"),
+                params: 0,
                 body: vec![
                     X64::Push(X64R::RBX),
                     X64::Push(X64R::RSI),
@@ -163,15 +177,14 @@ mod tests {
                     X64::Push(X64R::R13),
                     X64::Push(X64R::R14),
                     X64::Push(X64R::R15),
-                    X64::Push(X64R::RAX),
                     X64::Push(X64R::RCX),
                     X64::Push(X64R::RDX),
                     X64::Push(X64R::R8),
                     X64::Push(X64R::R9),
                     X64::Push(X64R::R10),
                     X64::Push(X64R::R11),
+                    X64::SubNum(X64R::RSP, X64R::FRAME_SIZE),
                     X64::MovReg(X64R::RBP, X64R::RSP),
-                    X64::SubNum(X64R::RSP, 5 * X64R::INT_SIZE),
                     X64::MovToStack(0 * X64R::INT_SIZE, X64R::R15),
                     X64::MovReg(X64R::RCX, X64R::R15),
                     X64::MovToStack(1 * X64R::INT_SIZE, X64R::R14),
@@ -181,17 +194,19 @@ mod tests {
                     X64::MovToStack(3 * X64R::INT_SIZE, X64R::R12),
                     X64::MovReg(X64R::R9, X64R::R12),
                     X64::MovToStack(4 * X64R::INT_SIZE, X64R::R11),
-                    X64::Call(String::from("f"), Vec::new()),
-                    X64::MovReg(X64R::RSP, X64R::RBP),
+                    X64::Call(String::from("f"), Vec::new(), X64R::R10),
+                    X64::AddNum(X64R::RSP, X64R::FRAME_SIZE),
                     X64::Pop(X64R::R11),
                     X64::Pop(X64R::R10),
                     X64::Pop(X64R::R9),
                     X64::Pop(X64R::R8),
                     X64::Pop(X64R::RDX),
                     X64::Pop(X64R::RCX),
-                    X64::Pop(X64R::RAX),
-                    X64::MovNum(X64R::R10, 0),
-                    X64::MovReg(X64R::RAX, X64R::R10),
+                    X64::MovReg(X64R::R10, X64R::RAX),
+                    X64::MovNum(X64R::R9, 1),
+                    X64::MovReg(X64R::R8, X64R::R10),
+                    X64::Add(X64R::R8, X64R::R9),
+                    X64::MovReg(X64R::RAX, X64R::R8),
                     X64::Pop(X64R::R15),
                     X64::Pop(X64R::R14),
                     X64::Pop(X64R::R13),
@@ -219,8 +234,7 @@ mod tests {
         let ast = parser::parse(
             "
             int main() {
-                int a;
-                a = 1+2+3+4+5+6+7;
+                1+2+3+4+5+6+7;
                 1;
             }
         ",
@@ -229,9 +243,10 @@ mod tests {
         let cfg = ssa::destruct(ssa);
         let asm = X64Builder::new().build(cfg);
         let asm = alloc(asm);
-        if let X64::MovToStack(_, reg) = &asm[0].body[28] {
+        if let X64::MovToStack(_, reg) = &asm[0].body[26] {
             let expected = vec![X64Function {
                 name: String::from("main"),
+                params: 0,
                 body: vec![
                     X64::Push(X64R::RBX),
                     X64::Push(X64R::RSI),
@@ -259,8 +274,6 @@ mod tests {
                     X64::MovNum(X64R::RCX, 7),
                     X64::MovReg(X64R::RBX, X64R::RDX),
                     X64::Add(X64R::RBX, X64R::RCX),
-                    X64::MovReg(X64R::RAX, X64R::RBX),
-                    X64::SubNum(X64R::RSP, 4),
                     X64::MovToStack(0, *reg),
                     X64::MovNum(*reg, 1),
                     X64::Pop(X64R::R15),

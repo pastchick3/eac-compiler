@@ -5,7 +5,7 @@ const INDENT_SIZE: usize = 4;
 pub fn run(asm: X64Program) -> String {
     let mut file = String::from(".code\n");
     let mut indent_level = 1;
-    for X64Function { name, body } in asm {
+    for X64Function { name, body, .. } in asm {
         file += &format!("{}{} proc\n", indent(indent_level), name);
         indent_level += 1;
         for asm in body {
@@ -31,12 +31,13 @@ mod tests {
     fn serialize() {
         let program = vec![X64Function {
             name: String::from("main"),
+            params: 0,
             body: vec![
                 X64::MovNum(X64R::RSP, 0),
                 X64::MovReg(X64R::RSP, X64R::RSP),
                 X64::MovToStack(0, X64R::RSP),
                 X64::MovFromStack(X64R::RSP, 0),
-                X64::Call(String::from("Tag"), Vec::new()),
+                X64::Call(String::from("Tag"), Vec::new(), X64R::RSP),
                 X64::Neg(X64R::RSP),
                 X64::CmpNum(X64R::RSP, 0),
                 X64::CmpReg(X64R::RSP, X64R::RSP),
@@ -46,7 +47,7 @@ mod tests {
                 X64::Jge(String::from("Tag")),
                 X64::Je(String::from("Tag")),
                 X64::Jne(String::from("Tag")),
-                X64::Jump(String::from("Tag")),
+                X64::Jmp(String::from("Tag")),
                 X64::Tag(String::from("Tag")),
                 X64::Imul(X64R::RSP, X64R::RSP),
                 X64::Idiv(X64R::RSP, X64R::RSP),
@@ -65,8 +66,8 @@ mod tests {
     main proc
         mov RSP, 0
         mov RSP, RSP
-        mov [RBP-0], RSP
-        mov RSP, [RBP-0]
+        mov 0[RBP], RSP
+        mov RSP, 0[RBP]
         call Tag
         neg RSP
         cmp RSP, 0
@@ -77,7 +78,7 @@ mod tests {
         jge Tag
         je Tag
         jne Tag
-        jump Tag
+        jmp Tag
         Tag:
         imul RSP, RSP
         idiv RSP, RSP
