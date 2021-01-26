@@ -1,20 +1,26 @@
-use crate::x64::{X64Function, X64Program, X64RegisterAllocator, X64};
+use crate::x64::{Register, X64Function, X64Program, X64RegisterAllocator, X64};
 
 pub fn alloc(asm: X64Program) -> X64Program {
     asm.into_iter()
-        .map(|X64Function { name, params, body }| X64Function {
-            name,
-            params,
-            body: alloc_body(params, body),
-        })
+        .map(
+            |X64Function {
+                 name,
+                 param_cnt,
+                 body,
+             }| X64Function {
+                name,
+                param_cnt,
+                body: alloc_body(param_cnt, body),
+            },
+        )
         .collect()
 }
 
-fn alloc_body(params: usize, body: Vec<X64>) -> Vec<X64> {
-    let mut allocator = X64RegisterAllocator::new(params);
-    let mut asms = allocator.prolog();
+fn alloc_body(param_cnt: usize, body: Vec<X64>) -> Vec<X64> {
+    let mut allocator = X64RegisterAllocator::new(param_cnt);
+    let mut assemblies = allocator.prolog();
     for asm in body {
-        asms.extend(match asm {
+        let asms = match asm {
             X64::MovNum(vreg, num) => {
                 let (mut asms, reg) = allocator.alloc(vreg);
                 asms.push(X64::MovNum(reg, num));
@@ -28,9 +34,11 @@ fn alloc_body(params: usize, body: Vec<X64>) -> Vec<X64> {
                 left_asms
             }
             X64::Call(func, args, ret) => {
-                let (mut asms, ret) = allocator.call_prolog(args, ret);
-                asms.push(X64::Call(func, Vec::new(), ret));
+                let mut asms = allocator.call_prolog(args);
+                asms.push(X64::Call(func, Vec::new(), Register::Virtual(0)));
                 asms.extend(allocator.call_epilog());
+                let (a_s, ret) = allocator.alloc(ret);
+                asms.extend(a_s);
                 asms.push(X64::MovReg(ret, X64RegisterAllocator::RAX));
                 asms
             }
@@ -99,10 +107,11 @@ fn alloc_body(params: usize, body: Vec<X64>) -> Vec<X64> {
                 asms
             }
             asm => vec![asm],
-        });
+        };
+        assemblies.extend(asms);
     }
-    asms.extend(allocator.epilog());
-    asms
+    assemblies.extend(allocator.epilog());
+    assemblies
 }
 
 #[cfg(test)]
@@ -131,14 +140,14 @@ mod tests {
             }
         ",
         );
-        let ssa = ssa::construct(ast);
-        let cfg = ssa::destruct(ssa);
+        let (ssa, prog_leaves) = ssa::construct(ast);
+        let cfg = ssa::destruct(ssa, prog_leaves);
         let asm = X64Builder::new().build(cfg);
         let asm = alloc(asm);
         let expected = vec![
             X64Function {
                 name: String::from("f"),
-                params: 5,
+                param_cnt: 5,
                 body: vec![
                     X64::Push(X64R::RBX),
                     X64::Push(X64R::RSI),
@@ -168,7 +177,7 @@ mod tests {
             },
             X64Function {
                 name: String::from("main"),
-                params: 0,
+                param_cnt: 0,
                 body: vec![
                     X64::Push(X64R::RBX),
                     X64::Push(X64R::RSI),
@@ -194,7 +203,7 @@ mod tests {
                     X64::MovToStack(3 * X64R::INT_SIZE, X64R::R12),
                     X64::MovReg(X64R::R9, X64R::R12),
                     X64::MovToStack(4 * X64R::INT_SIZE, X64R::R11),
-                    X64::Call(String::from("f"), Vec::new(), X64R::R10),
+                    X64::Call(String::from("f"), Vec::new(), Register::Virtual(0)),
                     X64::AddNum(X64R::RSP, X64R::FRAME_SIZE),
                     X64::Pop(X64R::R11),
                     X64::Pop(X64R::R10),
@@ -239,14 +248,14 @@ mod tests {
             }
         ",
         );
-        let ssa = ssa::construct(ast);
-        let cfg = ssa::destruct(ssa);
+        let (ssa, prog_leaves) = ssa::construct(ast);
+        let cfg = ssa::destruct(ssa, prog_leaves);
         let asm = X64Builder::new().build(cfg);
         let asm = alloc(asm);
         if let X64::MovToStack(_, reg) = &asm[0].body[26] {
             let expected = vec![X64Function {
                 name: String::from("main"),
-                params: 0,
+                param_cnt: 0,
                 body: vec![
                     X64::Push(X64R::RBX),
                     X64::Push(X64R::RSI),

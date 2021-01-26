@@ -1,7 +1,7 @@
 mod asm;
 mod ir;
 mod parser;
-mod reg_alloc;
+mod reg_allocator;
 mod serializer;
 mod ssa;
 mod x64;
@@ -17,19 +17,19 @@ pub struct Opt {
     pub input: PathBuf,
 
     #[structopt(long)]
-    ast: bool,
+    pub ast: bool,
 
     #[structopt(long)]
-    ssa: bool,
+    pub ssa: bool,
 
     #[structopt(long)]
-    cfg: bool,
+    pub cfg: bool,
 
     #[structopt(long)]
-    vasm: bool,
+    pub vasm: bool,
 
     #[structopt(long)]
-    asm: bool,
+    pub asm: bool,
 }
 
 pub fn compile(source: &str, opt: Opt) -> Option<String> {
@@ -38,12 +38,12 @@ pub fn compile(source: &str, opt: Opt) -> Option<String> {
         println!("{:#?}", ast);
         return None;
     }
-    let ssa = ssa::construct(ast);
+    let (ssa, prog_leaves) = ssa::construct(ast);
     if opt.ssa {
         println!("{:#?}", ssa);
         return None;
     }
-    let cfg = ssa::destruct(ssa);
+    let cfg = ssa::destruct(ssa, prog_leaves);
     if opt.cfg {
         println!("{:#?}", cfg);
         return None;
@@ -53,7 +53,7 @@ pub fn compile(source: &str, opt: Opt) -> Option<String> {
         println!("{:#?}", vasm);
         return None;
     }
-    let asm = reg_alloc::alloc(vasm);
+    let asm = reg_allocator::alloc(vasm);
     if opt.asm {
         println!("{:#?}", asm);
         return None;

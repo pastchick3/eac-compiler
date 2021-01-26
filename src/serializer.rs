@@ -31,7 +31,7 @@ mod tests {
     fn serialize() {
         let program = vec![X64Function {
             name: String::from("main"),
-            params: 0,
+            param_cnt: 0,
             body: vec![
                 X64::MovNum(X64R::RSP, 0),
                 X64::MovReg(X64R::RSP, X64R::RSP),

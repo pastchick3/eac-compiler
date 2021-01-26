@@ -22,6 +22,6 @@ fn main() {
                 "/entry:drive",
             ])
             .output()
-            .expect("Fail to call the assembler.");
+            .expect("Fail to call MASM for x64.");
     };
 }

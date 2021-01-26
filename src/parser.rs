@@ -13,6 +13,15 @@ pub fn parse(source: &str) -> Program {
     build_ast()
 }
 
+#[link(name = "parser")]
+extern "C" {
+    fn _parse(
+        path: *const c_char,
+        rs_get_str: extern "C" fn(size_t) -> *mut c_char,
+        rs_emit_event: extern "C" fn(*mut c_char, *mut c_char),
+    ) -> *mut c_char;
+}
+
 extern "C" fn rs_get_str(len: size_t) -> *mut c_char {
     CString::new(vec![1; len]).unwrap().into_raw()
 }
@@ -25,20 +34,11 @@ extern "C" fn rs_emit_event(tag: *mut c_char, text: *mut c_char) {
     }
 }
 
-#[link(name = "parser")]
-extern "C" {
-    fn _parse(
-        path: *const c_char,
-        rs_get_str: extern "C" fn(size_t) -> *mut c_char,
-        rs_emit_event: extern "C" fn(*mut c_char, *mut c_char),
-    ) -> *mut c_char;
-}
-
 fn build_ast() -> Program {
     let mut program = Program::new();
     let mut expr_stack = Vec::new();
     let mut stmt_stack = Vec::new();
-    let mut compound_stmt_stack = Vec::new();
+    let mut compound_stmt_ptr_stack = Vec::new();
     unsafe {
         for (tag, text) in &EVENTS {
             match tag.as_str() {
@@ -101,10 +101,10 @@ fn build_ast() -> Program {
                     stmt_stack.push(stmt);
                 }
                 "EnterCompoundStatement" => {
-                    compound_stmt_stack.push(stmt_stack.len());
+                    compound_stmt_ptr_stack.push(stmt_stack.len());
                 }
                 "ExitCompoundStatement" => {
-                    let compound_stmt_ptr = compound_stmt_stack.pop().unwrap();
+                    let compound_stmt_ptr = compound_stmt_ptr_stack.pop().unwrap();
                     let mut stmts = Vec::new();
                     while stmt_stack.len() != compound_stmt_ptr {
                         stmts.push(stmt_stack.pop().unwrap());
@@ -120,16 +120,12 @@ fn build_ast() -> Program {
                 }
                 "ExitSelectionStatement" => {
                     let condition = expr_stack.pop().unwrap();
-                    let (body, alternative) = match text.is_empty() {
-                        true => {
-                            let body = stmt_stack.pop().unwrap();
-                            (body, None)
-                        }
-                        false => {
-                            let alternative = stmt_stack.pop().unwrap();
-                            let body = stmt_stack.pop().unwrap();
-                            (body, Some(Box::new(alternative)))
-                        }
+                    let (body, alternative) = if text.is_empty() {
+                        (stmt_stack.pop().unwrap(), None)
+                    } else {
+                        let alternative = stmt_stack.pop().unwrap();
+                        let body = stmt_stack.pop().unwrap();
+                        (body, Some(Box::new(alternative)))
                     };
                     let stmt = Statement::If {
                         condition,
@@ -139,11 +135,9 @@ fn build_ast() -> Program {
                     stmt_stack.push(stmt);
                 }
                 "ExitIterationStatement" => {
-                    let condition = expr_stack.pop().unwrap();
-                    let body = stmt_stack.pop().unwrap();
                     let stmt = Statement::While {
-                        condition,
-                        body: Box::new(body),
+                        condition: expr_stack.pop().unwrap(),
+                        body: Box::new(stmt_stack.pop().unwrap()),
                     };
                     stmt_stack.push(stmt);
                 }

@@ -85,15 +85,16 @@ pub struct SSAFunction {
 
 pub type SSAProgram = Vec<SSAFunction>;
 
+// A supporting builder used in the data-flow analysis.
 #[derive(Debug, PartialEq)]
 pub struct CFGBuilder {
     blocks: Vec<Block>,
     current: usize,
     while_cond: usize,
     if_cond: usize,
-    if_alt: bool,
     if_enter_body: usize,
     if_exit_body: usize,
+    if_alt: bool,
     if_enter_alt: usize,
     if_exit_alt: usize,
 }
@@ -105,9 +106,9 @@ impl CFGBuilder {
             current: 0,
             while_cond: 0,
             if_cond: 0,
-            if_alt: false,
             if_enter_body: 0,
             if_exit_body: 0,
+            if_alt: false,
             if_enter_alt: 0,
             if_exit_alt: 0,
         }
@@ -156,7 +157,7 @@ impl CFGBuilder {
         };
         self.push(stmt);
         self.if_cond = self.current;
-        self.if_alt = false;
+        self.if_alt = alt;
         self.enter_new_block();
     }
 
@@ -171,7 +172,6 @@ impl CFGBuilder {
     }
 
     pub fn enter_if_alt(&mut self) {
-        self.if_alt = true;
         self.if_enter_alt = self.current;
     }
 

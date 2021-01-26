@@ -2,6 +2,13 @@
 
 A simple C compiler for learning, based on "Engineering a Compiler (the 2nd Edition)".
 
+```
+antlr4-runtime.dll
+driver.asm
+eac-compiler.exe
+fib.c
+```
+
 [C grammar](https://github.com/antlr/grammars-v4)
 
 cargo test -- --test-threads=1

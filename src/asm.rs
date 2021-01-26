@@ -34,7 +34,7 @@ impl X64Builder {
                      ..
                  }| X64Function {
                     name,
-                    params: parameters.len(),
+                    param_cnt: parameters.len(),
                     body: self.build_body(parameters, body),
                 },
             )
@@ -63,31 +63,15 @@ impl X64Builder {
         }
         for tag in self.tags.entry(index).or_default() {
             match tag {
-                Tag::IfNoAlt(tag) => {
-                    let mut tag_end = tag.clone();
-                    tag_end.push_str("End");
-                    asms.push(X64::Tag(tag_end));
-                }
-                Tag::IfBody(tag) => {
-                    let mut tag_end = tag.clone();
-                    tag_end.push_str("End");
-                    asms.push(X64::Jmp(tag_end));
-                }
+                Tag::IfNoAlt(tag) => asms.push(X64::Tag(format!("{}End", tag))),
+                Tag::IfBody(tag) => asms.push(X64::Jmp(format!("{}End", tag))),
                 Tag::IfAlt(tag) => {
-                    let mut tag_start = tag.clone();
-                    tag_start.push_str("Start");
-                    asms.insert(0, X64::Tag(tag_start));
-                    let mut tag_end = tag.clone();
-                    tag_end.push_str("End");
-                    asms.push(X64::Tag(tag_end));
+                    asms.insert(0, X64::Tag(format!("{}Start", tag)));
+                    asms.push(X64::Tag(format!("{}End", tag)));
                 }
                 Tag::WhileBody(tag) => {
-                    let mut tag_start = tag.clone();
-                    tag_start.push_str("Start");
-                    asms.push(X64::Jmp(tag_start));
-                    let mut tag_end = tag.clone();
-                    tag_end.push_str("End");
-                    asms.push(X64::Tag(tag_end));
+                    asms.push(X64::Jmp(format!("{}Start", tag)));
+                    asms.push(X64::Tag(format!("{}End", tag)));
                 }
             }
         }
@@ -97,7 +81,7 @@ impl X64Builder {
     fn build_stmt(&mut self, stmt: Statement) -> Vec<X64> {
         match stmt {
             Statement::Nop => Vec::new(),
-            Statement::Phi(_, _) => Vec::new(),
+            Statement::Phi(_, _) => unreachable!(),
             Statement::Declaration(var) => {
                 self.allocator.from_var(var);
                 Vec::new()
@@ -112,39 +96,33 @@ impl X64Builder {
                 ..
             } => {
                 let (mut asms, reg) = self.build_expr(condition);
+                // Return immediately if the body and the alternative are empty.
                 if self.successors.len() == 1 {
                     return asms;
                 }
-                let mut tag = format!("{}", reg);
                 if alternative.is_none() {
                     let body = self.successors[1] - 1;
-                    let if_no_alt = Tag::IfNoAlt(tag.clone());
+                    let if_no_alt = Tag::IfNoAlt(format!("{}", reg));
                     self.tags.entry(body).or_default().push(if_no_alt);
-                    tag.push_str("End");
-                    asms.extend(vec![X64::CmpNum(reg, 0), X64::Je(tag)]);
+                    asms.extend(vec![X64::CmpNum(reg, 0), X64::Je(format!("{}End", reg))]);
                 } else {
                     let body = self.successors[0];
-                    let if_body = Tag::IfBody(tag.clone());
+                    let if_body = Tag::IfBody(format!("{}", reg));
                     self.tags.entry(body).or_default().push(if_body);
                     let alt = self.successors[1];
-                    let if_alt = Tag::IfAlt(tag.clone());
+                    let if_alt = Tag::IfAlt(format!("{}", reg));
                     self.tags.entry(alt).or_default().push(if_alt);
-                    tag.push_str("Start");
-                    asms.extend(vec![X64::CmpNum(reg, 0), X64::Je(tag)]);
+                    asms.extend(vec![X64::CmpNum(reg, 0), X64::Je(format!("{}Start", reg))]);
                 }
                 asms
             }
             Statement::While { condition, .. } => {
                 let (mut asms, reg) = self.build_expr(condition);
-                let mut tag = format!("{}", reg);
                 let body = self.successors[0];
-                let while_body = Tag::WhileBody(tag.clone());
+                let while_body = Tag::WhileBody(format!("{}", reg));
                 self.tags.entry(body).or_default().push(while_body);
-                let mut tag_start = tag.clone();
-                tag_start.push_str("Start");
-                asms.insert(0, X64::Tag(tag_start));
-                tag.push_str("End");
-                asms.extend(vec![X64::CmpNum(reg, 0), X64::Je(tag)]);
+                asms.insert(0, X64::Tag(format!("{}Start", reg)));
+                asms.extend(vec![X64::CmpNum(reg, 0), X64::Je(format!("{}End", reg))]);
                 asms
             }
             Statement::Return(Some(expr)) => {
@@ -191,22 +169,21 @@ impl X64Builder {
             } => match operator {
                 "+" => self.build_expr(*expression),
                 "-" => {
-                    let (mut asm, reg) = self.build_expr(*expression);
-                    asm.push(X64::Neg(reg));
-                    (asm, reg)
+                    let (mut asms, reg) = self.build_expr(*expression);
+                    asms.push(X64::Neg(reg));
+                    (asms, reg)
                 }
                 "!" => {
-                    let (mut asm, reg) = self.build_expr(*expression);
+                    let (mut asms, reg) = self.build_expr(*expression);
                     let r = self.allocator.create_temp();
-                    let tag = format!("{}", r);
-                    asm.extend(vec![
+                    asms.extend(vec![
                         X64::MovNum(r, 1),
                         X64::CmpNum(reg, 0),
-                        X64::Je(tag.clone()),
+                        X64::Je(format!("{}", r)),
                         X64::MovNum(r, 0),
-                        X64::Tag(tag),
+                        X64::Tag(format!("{}", r)),
                     ]);
-                    (asm, r)
+                    (asms, r)
                 }
                 _ => unreachable!(),
             },
@@ -221,54 +198,33 @@ impl X64Builder {
                     (vec![X64::MovReg(left_reg, right_reg)], left_reg)
                 } else {
                     let reg = self.allocator.create_temp();
-                    match operator {
-                        "*" => (
-                            vec![X64::MovReg(reg, left_reg), X64::Imul(reg, right_reg)],
-                            reg,
-                        ),
-                        "/" => (
-                            vec![X64::MovReg(reg, left_reg), X64::Idiv(reg, right_reg)],
-                            reg,
-                        ),
-                        "+" => (
-                            vec![X64::MovReg(reg, left_reg), X64::Add(reg, right_reg)],
-                            reg,
-                        ),
-                        "-" => (
-                            vec![X64::MovReg(reg, left_reg), X64::Sub(reg, right_reg)],
-                            reg,
-                        ),
-                        "&&" => (
-                            vec![X64::MovReg(reg, left_reg), X64::And(reg, right_reg)],
-                            reg,
-                        ),
-                        "||" => (
-                            vec![X64::MovReg(reg, left_reg), X64::Or(reg, right_reg)],
-                            reg,
-                        ),
+                    let asms = match operator {
+                        "*" => vec![X64::MovReg(reg, left_reg), X64::Imul(reg, right_reg)],
+                        "/" => vec![X64::MovReg(reg, left_reg), X64::Idiv(reg, right_reg)],
+                        "+" => vec![X64::MovReg(reg, left_reg), X64::Add(reg, right_reg)],
+                        "-" => vec![X64::MovReg(reg, left_reg), X64::Sub(reg, right_reg)],
+                        "&&" => vec![X64::MovReg(reg, left_reg), X64::And(reg, right_reg)],
+                        "||" => vec![X64::MovReg(reg, left_reg), X64::Or(reg, right_reg)],
                         op => {
-                            let tag = format!("{}", reg);
                             let asm = match op {
-                                "<" => X64::Jl(tag.clone()),
-                                ">" => X64::Jg(tag.clone()),
-                                "<=" => X64::Jle(tag.clone()),
-                                ">=" => X64::Jge(tag.clone()),
-                                "==" => X64::Je(tag.clone()),
-                                "!=" => X64::Jne(tag.clone()),
+                                "<" => X64::Jl(format!("{}", reg)),
+                                ">" => X64::Jg(format!("{}", reg)),
+                                "<=" => X64::Jle(format!("{}", reg)),
+                                ">=" => X64::Jge(format!("{}", reg)),
+                                "==" => X64::Je(format!("{}", reg)),
+                                "!=" => X64::Jne(format!("{}", reg)),
                                 _ => unreachable!(),
                             };
-                            (
-                                vec![
-                                    X64::MovNum(reg, 1),
-                                    X64::CmpReg(left_reg, right_reg),
-                                    asm,
-                                    X64::MovNum(reg, 0),
-                                    X64::Tag(tag),
-                                ],
-                                reg,
-                            )
+                            vec![
+                                X64::MovNum(reg, 1),
+                                X64::CmpReg(left_reg, right_reg),
+                                asm,
+                                X64::MovNum(reg, 0),
+                                X64::Tag(format!("{}", reg)),
+                            ]
                         }
-                    }
+                    };
+                    (asms, reg)
                 };
                 left_asms.extend(right_asms);
                 left_asms.extend(asms);
@@ -297,12 +253,12 @@ mod tests {
             }
         ",
         );
-        let ssa = ssa::construct(ast);
-        let cfg = ssa::destruct(ssa);
+        let (ssa, prog_leaves) = ssa::construct(ast);
+        let cfg = ssa::destruct(ssa, prog_leaves);
         let asm = X64Builder::new().build(cfg);
         let expected = vec![X64Function {
             name: String::from("main"),
-            params: 0,
+            param_cnt: 0,
             body: vec![X64::MovNum(Register::Virtual(1), 1)],
         }];
         assert_eq!(asm, expected);
@@ -321,26 +277,28 @@ mod tests {
             }
         ",
         );
-        let ssa = ssa::construct(ast);
-        let cfg = ssa::destruct(ssa);
+        let (ssa, prog_leaves) = ssa::construct(ast);
+        let cfg = ssa::destruct(ssa, prog_leaves);
         let asm = X64Builder::new().build(cfg);
         let expected = vec![
             X64Function {
                 name: String::from("f"),
-                params: 1,
-                body: vec![
-                    X64::Ret(Some(Register::Virtual(0))),
-                ],
+                param_cnt: 1,
+                body: vec![X64::Ret(Some(Register::Virtual(0)))],
             },
             X64Function {
                 name: String::from("main"),
-                params: 1,
+                param_cnt: 1,
                 body: vec![
-                    X64::Call(String::from("f"),vec![Register::Virtual(0)], Register::Virtual(1)),
+                    X64::Call(
+                        String::from("f"),
+                        vec![Register::Virtual(0)],
+                        Register::Virtual(1),
+                    ),
                     X64::MovNum(Register::Virtual(2), 1),
                     X64::MovReg(Register::Virtual(3), Register::Virtual(1)),
                     X64::Add(Register::Virtual(3), Register::Virtual(2)),
-                    X64::Ret(Some(Register::Virtual(3)))
+                    X64::Ret(Some(Register::Virtual(3))),
                 ],
             },
         ];
@@ -359,12 +317,12 @@ mod tests {
             }
         ",
         );
-        let ssa = ssa::construct(ast);
-        let cfg = ssa::destruct(ssa);
+        let (ssa, prog_leaves) = ssa::construct(ast);
+        let cfg = ssa::destruct(ssa, prog_leaves);
         let asm = X64Builder::new().build(cfg);
         let expected = vec![X64Function {
             name: String::from("main"),
-            params: 1,
+            param_cnt: 1,
             body: vec![
                 X64::Neg(Register::Virtual(1)),
                 X64::MovNum(Register::Virtual(2), 0),
@@ -388,12 +346,12 @@ mod tests {
             }
         ",
         );
-        let ssa = ssa::construct(ast);
-        let cfg = ssa::destruct(ssa);
+        let (ssa, prog_leaves) = ssa::construct(ast);
+        let cfg = ssa::destruct(ssa, prog_leaves);
         let asm = X64Builder::new().build(cfg);
         let expected = vec![X64Function {
             name: String::from("main"),
-            params: 2,
+            param_cnt: 2,
             body: vec![
                 X64::MovNum(Register::Virtual(2), 0),
                 X64::MovNum(Register::Virtual(3), 1),
@@ -469,12 +427,12 @@ mod tests {
             }
         ",
         );
-        let ssa = ssa::construct(ast);
-        let cfg = ssa::destruct(ssa);
+        let (ssa, prog_leaves) = ssa::construct(ast);
+        let cfg = ssa::destruct(ssa, prog_leaves);
         let asm = X64Builder::new().build(cfg);
         let expected = vec![X64Function {
             name: String::from("main"),
-            params: 0,
+            param_cnt: 0,
             body: vec![
                 X64::MovNum(Register::Virtual(0), 0),
                 X64::CmpNum(Register::Virtual(0), 0),
@@ -508,12 +466,12 @@ mod tests {
             }
         ",
         );
-        let ssa = ssa::construct(ast);
-        let cfg = ssa::destruct(ssa);
+        let (ssa, prog_leaves) = ssa::construct(ast);
+        let cfg = ssa::destruct(ssa, prog_leaves);
         let asm = X64Builder::new().build(cfg);
         let expected = vec![X64Function {
             name: String::from("main"),
-            params: 0,
+            param_cnt: 0,
             body: vec![
                 X64::Tag(String::from("VR0Start")),
                 X64::MovNum(Register::Virtual(0), 0),
@@ -545,12 +503,12 @@ mod tests {
             }
         ",
         );
-        let ssa = ssa::construct(ast);
-        let cfg = ssa::destruct(ssa);
+        let (ssa, prog_leaves) = ssa::construct(ast);
+        let cfg = ssa::destruct(ssa, prog_leaves);
         let asm = X64Builder::new().build(cfg);
         let expected = vec![X64Function {
             name: String::from("main"),
-            params: 0,
+            param_cnt: 0,
             body: vec![
                 X64::MovNum(Register::Virtual(0), 0),
                 X64::CmpNum(Register::Virtual(0), 0),
