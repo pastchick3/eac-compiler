@@ -156,6 +156,8 @@ enum RegStatus {
     Stack(usize), // offset
 }
 
+// `rsp` is the stack pointer (from 2^64-1 to 0).
+// `rbp` is the stack frame pointer (callee-saved).
 #[derive(Debug)]
 pub struct X64RegisterAllocator {
     vreg_map: HashMap<Register, RegStatus>,

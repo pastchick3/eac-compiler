@@ -2,6 +2,33 @@ use crate::ir::{Expression, SSAFunction, SSAProgram, SSAVar, Statement, CFG};
 use crate::x64::{Register, VRegisterAllocator, X64Function, X64Program, X64};
 use std::collections::HashMap;
 
+// # If without Alt (IfNoAlt)
+// <cond-start>
+// <cond>
+// <cond-end>: if false then jump to TagEnd
+// <body-start>
+// <body>
+// <body-end>: TagEnd
+//
+// # If with Alt (IfBody, IfAlt)
+// <cond-start>
+// <cond>
+// <cond-end>: if false then jump to TagStart
+// <body-start>
+// <body>
+// <body-end>: jump to TagEnd
+// <alt-start>: TagStart
+// <alt>
+// <alt-end>: TagEnd
+//
+// # While (WhileBody)
+// <cond-start>: TagStart
+// <cond>
+// <cond-end>: if false then jump to TagEnd
+// <body-start>
+// <body>
+// <body-end>: jump to TagStart
+// <body-end>: TagEnd
 enum Tag {
     IfNoAlt(String),
     IfBody(String),
