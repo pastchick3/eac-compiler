@@ -65,7 +65,7 @@ There are two extra points that worth mentioning. First, the FFI code that binds
 
 The instruction selection process of `eac-compiler` follows Chapter 11.4 (Insturction Selection via Tree-Pattern Matching), but because currently each AST/SSA node is mapped into an unique sequence of assembly code, the process looks pretty like the naive treewalk scheme.
 
-The register allocation process follows the bottom-up local register allocation in Chapter 13.3.2. Because `eac-compiler` does not compute the live range information for variables, registers will not be actively freed but just split to the stack if all physical registers are occupied.
+The register allocation process follows the bottom-up local register allocation in Chapter 13.3.2. Because `eac-compiler` does not compute the live range information for variables, registers will not be actively freed but just spilt to the stack if all physical registers are occupied.
 
 ## Grammar
 
